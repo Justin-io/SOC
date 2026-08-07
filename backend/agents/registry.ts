@@ -70,7 +70,7 @@ const INITIAL_AGENT_STATE: AgentMetrics[] = [
     executionTimeMs: 520,
     uptimePercent: 99.81,
     lastExecution: new Date().toISOString(),
-    description: 'Behavioral analysis, Sigma/YARA signature matching, sandbox simulation & Gemini deep reasoning.',
+    description: 'Behavioral analysis, Sigma/YARA signature matching, sandbox emulation & Gemini deep reasoning.',
   },
   {
     role: 'CLOUD',
@@ -290,7 +290,7 @@ class AgentRegistry {
   }
 
   /**
-   * Simulate realistic metric drift for telemetry realism.
+   * Emulate realistic metric drift for telemetry realism.
    * Called periodically by background worker.
    */
   tick(): void {

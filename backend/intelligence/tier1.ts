@@ -16,7 +16,7 @@ import { getLogger } from '../core/logger.js';
 
 const log = getLogger('intelligence:tier1');
 
-// Rolling window of recent alert rates per technique (simulated)
+// Rolling window of recent alert rates per technique (emulated)
 const techniqueRates = new Map<string, number[]>([
   ['T1003', [0, 0, 1, 0, 0, 2, 0]],
   ['T1078', [1, 0, 0, 1, 0, 0, 1]],

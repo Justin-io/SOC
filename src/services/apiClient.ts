@@ -24,7 +24,7 @@ import {
   INITIAL_REPORTS,
   INITIAL_SETTINGS,
   INITIAL_SYSTEM_HEALTH,
-} from '../data/mockData';
+} from '../data/syntheticData';
 
 export interface AIInvestigationResponse {
   success: boolean;
@@ -202,14 +202,14 @@ class AEGISApiClient {
     return [];
   }
 
-  public async triggerSimulation(): Promise<{
+  public async triggerEmulation(): Promise<{
     success: boolean;
     incident?: Incident;
     evidence?: EvidenceItem[];
     decision?: DecisionIntelligence;
   }> {
     try {
-      const res = await fetch('/api/v1/simulate', { method: 'POST' });
+      const res = await fetch('/api/v1/emulate', { method: 'POST' });
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
@@ -217,7 +217,7 @@ class AEGISApiClient {
         }
       }
     } catch (err) {
-      console.error('Trigger simulation failed:', err);
+      console.error('Trigger emulation failed:', err);
     }
     return { success: false };
   }

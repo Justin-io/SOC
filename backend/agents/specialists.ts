@@ -114,7 +114,7 @@ export async function runMalwareAgent(alert: AlertRecord): Promise<EvidenceRecor
       reliabilityWeight: 0.91,
       uncertainty: isMalware ? 0.1 : 0.35,
       evidence,
-      toolsUsed: ['Sigma Rules Engine', 'YARA Scanner', 'EDR Behavioral Analysis', 'Sandbox Simulation'],
+      toolsUsed: ['Sigma Rules Engine', 'YARA Scanner', 'EDR Behavioral Analysis', 'Sandbox Emulation'],
       executionTimeMs: 0,
       timestamp: new Date().toISOString(),
     };

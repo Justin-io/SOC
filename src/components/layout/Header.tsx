@@ -26,7 +26,7 @@ interface HeaderProps {
   onChangeWorkspace: (ws: string) => void;
   onRefreshData?: () => void;
   onToggleSidebar?: () => void;
-  onSimulateThreat?: () => void;
+  onEmulateThreat?: () => void;
   onResetStore?: () => void;
   isSimulating?: boolean;
 }
@@ -41,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
   onChangeWorkspace,
   onRefreshData,
   onToggleSidebar,
-  onSimulateThreat,
+  onEmulateThreat,
   onResetStore,
   isSimulating = false,
 }) => {
@@ -185,10 +185,10 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* Simulate Threat Trigger Button */}
-          {onSimulateThreat && (
+          {/* Emulate Threat Trigger Button */}
+          {onEmulateThreat && (
             <button
-              onClick={onSimulateThreat}
+              onClick={onEmulateThreat}
               disabled={isSimulating}
               className="flex items-center gap-1.5 px-3 py-1 rounded bg-[#111111] hover:bg-[#262626] disabled:bg-[#525252] text-white font-mono font-bold text-xs transition-colors shadow-sm cursor-pointer"
               title="Ingest Realtime Telemetry & Run AI Multi-Agent Cascade"

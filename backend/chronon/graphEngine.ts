@@ -1,6 +1,6 @@
 /**
  * AEGIS-X Backend — Chronon Prediction Engine
- * Network graph with Laplacian propagation, lateral movement simulation,
+ * Network graph with Laplacian propagation, lateral movement emulation,
  * compromise probability forecasting.
  */
 
@@ -38,10 +38,10 @@ export interface PropagationResult {
 }
 
 /**
- * Simulate lateral movement propagation from compromised nodes.
+ * Emulate lateral movement propagation from compromised nodes.
  * Uses simplified graph Laplacian diffusion.
  */
-export function simulatePropagation(
+export function emulatePropagation(
   nodes: NetworkNode[],
   steps = 5,
   timeStepMinutes = 15
@@ -59,7 +59,7 @@ export function simulatePropagation(
     const newRisk = new Map<string, number>(riskVector);
 
     for (const node of nodes) {
-      if (node.status === 'ISOLATED' || node.status === 'SIMULATED_ISOLATION') continue;
+      if (node.status === 'ISOLATED' || node.status === 'EMULATED_ISOLATION') continue;
 
       let inflow = 0;
       for (const source of initiallyCompromised) {
@@ -105,7 +105,7 @@ export function simulatePropagation(
 export function generateRiskForecasts(
   nodes: NetworkNode[]
 ): RiskForecast[] {
-  const propagation = simulatePropagation(nodes);
+  const propagation = emulatePropagation(nodes);
 
   return propagation.map((p) => ({
     timestamp: new Date().toISOString(),

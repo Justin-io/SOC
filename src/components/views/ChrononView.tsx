@@ -15,13 +15,13 @@ import { Button } from '../ui/Button';
 export const ChrononView: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [speed, setSpeed] = useState<number>(1);
-  const [simulationStep, setSimulationStep] = useState<number>(2);
+  const [emulationStep, setEmulationStep] = useState<number>(2);
   const [selectedVictim, setSelectedVictim] = useState<string | null>('DC01-PROD-EAST');
 
   useEffect(() => {
     if (!isPlaying) return;
     const interval = setInterval(() => {
-      setSimulationStep((prev) => (prev >= 100 ? 0 : prev + 1));
+      setEmulationStep((prev) => (prev >= 100 ? 0 : prev + 1));
     }, 300 / speed);
     return () => clearInterval(interval);
   }, [isPlaying, speed]);
@@ -44,12 +44,12 @@ export const ChrononView: React.FC = () => {
             Chronon Time-Series Risk Wave Propagation
           </h1>
           <p className="text-xs text-[#737373] font-mono mt-0.5">
-            Heatmap Simulation of Infrastructural Contagion & Attacker Wave Velocity
+            Heatmap Emulation of Infrastructural Contagion & Attacker Wave Velocity
           </p>
         </div>
         <div className="flex items-center gap-2 font-mono text-xs">
           <Clock size={16} className="text-amber-600" />
-          <span className="font-bold text-[#111111]">T + {simulationStep * 6} seconds</span>
+          <span className="font-bold text-[#111111]">T + {emulationStep * 6} seconds</span>
         </div>
       </div>
 
@@ -65,7 +65,7 @@ export const ChrononView: React.FC = () => {
             <span>{isPlaying ? 'Pause Wave' : 'Resume Wave'}</span>
           </Button>
 
-          <Button variant="outline" size="sm" onClick={() => setSimulationStep(0)}>
+          <Button variant="outline" size="sm" onClick={() => setEmulationStep(0)}>
             <RotateCcw size={13} className="mr-1" />
             <span>Reset Time</span>
           </Button>
@@ -95,8 +95,8 @@ export const ChrononView: React.FC = () => {
             type="range"
             min={0}
             max={100}
-            value={simulationStep}
-            onChange={(e) => setSimulationStep(Number(e.target.value))}
+            value={emulationStep}
+            onChange={(e) => setEmulationStep(Number(e.target.value))}
             className="w-full accent-[#111111]"
           />
           <span className="text-[#737373] text-[10px]">T=600s</span>
@@ -106,7 +106,7 @@ export const ChrononView: React.FC = () => {
       {/* Heatmap Infrastructure Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {nodes.map((node) => {
-          const riskPercent = Math.round(node.riskAtStep(simulationStep));
+          const riskPercent = Math.round(node.riskAtStep(emulationStep));
           let colorClass = 'bg-[#FAFAFA] border-[#E5E5E5] text-[#111111]';
           if (riskPercent > 70) {
             colorClass = 'bg-red-50 border-red-300 text-red-900';

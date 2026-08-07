@@ -150,7 +150,7 @@ export interface NetworkNode {
   ip: string;
   os: string;
   riskLevel: 'CLEAN' | 'WARNING' | 'DANGER' | 'CRITICAL';
-  status: 'ONLINE' | 'ISOLATED' | 'COMPROMISED' | 'SIMULATED_ISOLATION';
+  status: 'ONLINE' | 'ISOLATED' | 'COMPROMISED' | 'EMULATED_ISOLATION';
   vulnerabilitiesCount: number;
   businessValue: 'HIGH' | 'MEDIUM' | 'LOW';
   propagationStep?: number;

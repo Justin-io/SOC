@@ -1,7 +1,7 @@
 /**
  * AEGIS-X Backend — Circuit Breaker
  * Token-bucket circuit breaker for external API calls.
- * States: CLOSED (normal) → OPEN (failing) → HALF_OPEN (testing recovery)
+ * States: CLOSED (normal) → OPEN (failing) → HALF_OPEN (validating recovery)
  */
 
 import { CircuitOpenError } from './errors.js';

@@ -21,14 +21,14 @@ interface DashboardViewProps {
   incidents: Incident[];
   systemHealth: SystemHealthMetrics;
   onNavigateView: (view: ViewType, incidentId?: string) => void;
-  onSimulateThreat?: () => void;
+  onEmulateThreat?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   incidents,
   systemHealth,
   onNavigateView,
-  onSimulateThreat,
+  onEmulateThreat,
 }) => {
   const activeIncidents = incidents.filter((i) => i.status !== 'RESOLVED' && i.status !== 'FALSE_POSITIVE');
   const criticalIncidents = incidents.filter((i) => i.severity === 'CRITICAL' && i.status !== 'RESOLVED');
@@ -173,16 +173,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="max-w-md mx-auto space-y-1">
                 <h3 className="text-base font-bold text-[#111111]">SOC Nominal — Zero Active Incidents</h3>
                 <p className="text-xs text-[#737373] font-mono">
-                  All enterprise assets are nominal. Ingest live telemetry or trigger a threat simulation to run the AI multi-agent cascade.
+                  All enterprise assets are nominal. Ingest live telemetry or trigger a threat emulation to run the AI multi-agent cascade.
                 </p>
               </div>
-              {onSimulateThreat && (
+              {onEmulateThreat && (
                 <button
-                  onClick={onSimulateThreat}
+                  onClick={onEmulateThreat}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded bg-[#111111] hover:bg-[#262626] text-white font-mono font-bold text-xs transition-colors shadow-sm cursor-pointer"
                 >
                   <Zap size={14} className="text-amber-400 fill-amber-400" />
-                  <span>Ingest Telemetry & Simulate Live Threat</span>
+                  <span>Ingest Telemetry & Emulate Live Threat</span>
                 </button>
               )}
             </div>

@@ -1,14 +1,9 @@
 import React, { useState } from 'react';
 import {
-  Cpu,
-  Shield,
   AlertCircle,
   CheckCircle2,
   Lock,
   RotateCcw,
-  DollarSign,
-  TrendingDown,
-  Users,
 } from 'lucide-react';
 import { NetworkNode, DigitalTwinState } from '../../types/soc';
 import { Card } from '../ui/Card';
@@ -18,18 +13,18 @@ interface DigitalTwinViewProps {
   nodes: NetworkNode[];
   digitalTwinState: DigitalTwinState;
   onToggleIsolationNode: (nodeId: string) => void;
-  onResetSimulation: () => void;
+  onResetEmulation: () => void;
 }
 
 export const DigitalTwinView: React.FC<DigitalTwinViewProps> = ({
   nodes,
   digitalTwinState,
   onToggleIsolationNode,
-  onResetSimulation,
+  onResetEmulation,
 }) => {
   const [activeTab, setActiveTab] = useState<'SIDE_BY_SIDE' | 'BEFORE' | 'AFTER'>('SIDE_BY_SIDE');
 
-  const isolatedCount = nodes.filter((n) => n.status === 'ISOLATED' || n.status === 'SIMULATED_ISOLATION').length;
+  const isolatedCount = nodes.filter((n) => n.status === 'ISOLATED' || n.status === 'EMULATED_ISOLATION').length;
 
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto font-sans">
@@ -44,7 +39,7 @@ export const DigitalTwinView: React.FC<DigitalTwinViewProps> = ({
           </p>
         </div>
         <div className="flex items-center gap-2 font-mono text-xs">
-          <Button variant="outline" size="sm" onClick={onResetSimulation}>
+          <Button variant="outline" size="sm" onClick={onResetEmulation}>
             <RotateCcw size={13} className="mr-1.5" />
             <span>Reset Digital Twin Topology</span>
           </Button>
@@ -145,7 +140,7 @@ export const DigitalTwinView: React.FC<DigitalTwinViewProps> = ({
           <div className="flex items-center justify-between border-b border-[#E5E5E5] pb-2 font-mono text-xs">
             <h2 className="font-bold text-emerald-600 flex items-center gap-1.5">
               <CheckCircle2 size={15} />
-              <span>AFTER CONTAINMENT (SIMULATED TOPOLOGY)</span>
+              <span>AFTER CONTAINMENT (EMULATED TOPOLOGY)</span>
             </h2>
             <span className="text-emerald-700 font-semibold">{isolatedCount} Hosts Isolated</span>
           </div>
@@ -153,7 +148,7 @@ export const DigitalTwinView: React.FC<DigitalTwinViewProps> = ({
           <div className="bg-[#FAFAFA] border border-[#E5E5E5] rounded-md p-4 space-y-3 min-h-[440px]">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 font-mono text-xs">
               {nodes.map((node) => {
-                const isIsolated = node.status === 'ISOLATED' || node.status === 'SIMULATED_ISOLATION';
+                const isIsolated = node.status === 'ISOLATED' || node.status === 'EMULATED_ISOLATION';
                 return (
                   <div
                     key={`after-${node.id}`}

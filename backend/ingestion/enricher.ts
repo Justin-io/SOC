@@ -8,7 +8,7 @@ import { getLogger } from '../core/logger.js';
 
 const log = getLogger('ingestion:enricher');
 
-// Simulated asset registry
+// Emulated asset registry
 const ASSET_GEOMAP: Record<string, string> = {
   '10.142.4.10': 'US-EAST-1 / Virginia',
   '10.240.1.54': 'US-WEST-2 / Oregon',

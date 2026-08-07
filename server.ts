@@ -33,7 +33,7 @@
  *     GET        /api/v1/settings
  *     PUT        /api/v1/settings
  *     GET        /api/v1/network/nodes
- *     POST       /api/v1/network/simulate
+ *     POST       /api/v1/network/emulate
  *     POST       /api/v1/chronon/forecast
  *     GET        /api/v1/metrics
  */
@@ -65,7 +65,7 @@ import { generateReport } from './backend/reports/reportGenerator.js';
 import { lookupIOC, runThreatIntelAgent } from './backend/agents/threatIntel.js';
 import { startInvestigation, getInvestigation, approveInvestigation, investigations } from './backend/orchestration/workflowEngine.js';
 import { normalizeAlert } from './backend/ingestion/normalizer.js';
-import { simulateContainment } from './backend/digital-twin/twinEngine.js';
+import { emulateContainment } from './backend/digital-twin/twinEngine.js';
 import { generateRiskForecasts } from './backend/chronon/graphEngine.js';
 import { iocCache } from './backend/memory/iocCache.js';
 
@@ -363,9 +363,9 @@ app.get('/api/v1/investigations', (_req: Request, res: Response) => {
   res.json({ success: true, data: all, timestamp: new Date().toISOString() });
 });
 
-// ─── Simulation & Telemetry Trigger ─────────────────────────────────────────
+// ─── Emulation & Telemetry Trigger ─────────────────────────────────────────
 
-app.post(['/api/v1/simulate', '/api/simulate'], async (_req: Request, res: Response) => {
+app.post(['/api/v1/emulate', '/api/emulate'], async (_req: Request, res: Response) => {
   try {
     const ai = getAI();
     const id = `INC-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
@@ -400,7 +400,7 @@ app.post(['/api/v1/simulate', '/api/simulate'], async (_req: Request, res: Respo
           mitreTactic = parsed.mitreTactic || mitreTactic;
         }
       } catch (err) {
-        log.warn('Simulate AI generation fallback:', err);
+        log.warn('Emulate AI generation fallback:', err);
       }
     }
 
@@ -497,7 +497,7 @@ app.post(['/api/v1/simulate', '/api/simulate'], async (_req: Request, res: Respo
     const investigationState = await startInvestigation(alertRecord);
 
     sseBus.publish('incident_update', {
-      type: 'SIMULATION_TRIGGERED',
+      type: 'EMULATION_TRIGGERED',
       incidentId: id,
       incident,
       timestamp: new Date().toISOString(),
@@ -510,13 +510,13 @@ app.post(['/api/v1/simulate', '/api/simulate'], async (_req: Request, res: Respo
       technique: { id: mitreId, name: mitreName },
       severity,
       confidence: incident.confidence,
-      source: 'AEGIS-X Realtime Simulation Bus',
+      source: 'AEGIS-X Realtime Emulation Bus',
     });
 
     auditChain.append({
       actor: 'SIMULATOR',
       actorType: 'AI_AGENT',
-      action: `SIMULATION_INGESTED [${id}] ${title}`,
+      action: `EMULATION_INGESTED [${id}] ${title}`,
       incidentId: id,
       details: { severity, mitreId, hostname },
     });
@@ -532,8 +532,8 @@ app.post(['/api/v1/simulate', '/api/simulate'], async (_req: Request, res: Respo
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    log.error('Simulation error:', err);
-    res.status(500).json({ success: false, error: 'Simulation failed', timestamp: new Date().toISOString() });
+    log.error('Emulation error:', err);
+    res.status(500).json({ success: false, error: 'Emulation failed', timestamp: new Date().toISOString() });
   }
 });
 
@@ -733,7 +733,7 @@ app.get('/api/v1/analytics/mitre', (_req: Request, res: Response) => {
 });
 
 app.get('/api/v1/analytics/trends', (_req: Request, res: Response) => {
-  // Simulated hourly trend data (last 24 hours)
+  // Emulated hourly trend data (last 24 hours)
   const now = Date.now();
   const trends = Array.from({ length: 24 }, (_, i) => ({
     timestamp: new Date(now - (23 - i) * 3600_000).toISOString(),
@@ -789,9 +789,9 @@ app.get('/api/v1/network/nodes', (_req: Request, res: Response) => {
   res.json({ success: true, data: store.networkNodes, timestamp: new Date().toISOString() });
 });
 
-app.post('/api/v1/network/simulate', (req: Request, res: Response) => {
+app.post('/api/v1/network/emulate', (req: Request, res: Response) => {
   const { isolateNodeIds = [] } = req.body;
-  const result = simulateContainment(store.networkNodes, isolateNodeIds);
+  const result = emulateContainment(store.networkNodes, isolateNodeIds);
 
   // Apply to store
   for (const nodeId of isolateNodeIds) {
@@ -959,7 +959,7 @@ async function startServer() {
           'Investigation Workflow Engine',
           'Fusion Engine (Bayesian)',
           'Chronon Prediction Engine',
-          'Digital Twin Simulation',
+          'Digital Twin Emulation',
           'IOC Cache',
           'Episodic Memory',
           'Playbook Memory',

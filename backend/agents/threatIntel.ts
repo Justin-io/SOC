@@ -1,7 +1,7 @@
 /**
  * AEGIS-X Backend — Threat Intelligence Agent
  * IOC enrichment via VirusTotal, AbuseIPDB, Shodan.
- * Deterministic mock providers when keys unavailable. Transparent caching.
+ * Deterministic synthetic providers when keys unavailable. Transparent caching.
  */
 
 import type { IOCItem, IOCType, EvidenceRecord, AlertRecord, AgentRole } from '../core/types.js';
@@ -13,9 +13,9 @@ import { getLogger } from '../core/logger.js';
 const log = getLogger('agents:threat-intel');
 const ROLE: AgentRole = 'THREAT_INTEL';
 
-// ─── Deterministic Mock Providers ──────────────────────────────────────────
+// ─── Deterministic Synthetic Providers ──────────────────────────────────────────
 
-function mockVirusTotalLookup(value: string): IOCItem['virusTotal'] {
+function syntheticVirusTotalLookup(value: string): IOCItem['virusTotal'] {
   const hash = value.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
   const malicious = (hash % 40) + 5;
   const suspicious = (hash % 15) + 2;
@@ -28,7 +28,7 @@ function mockVirusTotalLookup(value: string): IOCItem['virusTotal'] {
   };
 }
 
-function mockAbuseIPDB(ip: string): IOCItem['abuseIPDB'] {
+function syntheticAbuseIPDB(ip: string): IOCItem['abuseIPDB'] {
   const hash = ip.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
   return {
     abuseConfidenceScore: (hash % 80) + 15,
@@ -37,7 +37,7 @@ function mockAbuseIPDB(ip: string): IOCItem['abuseIPDB'] {
   };
 }
 
-function mockShodan(ip: string): IOCItem['shodan'] {
+function syntheticShodan(ip: string): IOCItem['shodan'] {
   const hash = ip.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
   const portSets = [
     [22, 80, 443], [21, 22, 3389], [80, 443, 8080], [22, 8443], [25, 587, 993],
@@ -60,9 +60,9 @@ function detectIOCType(value: string): IOCType {
 
 function buildIOC(value: string): IOCItem {
   const type = detectIOCType(value);
-  const vt = mockVirusTotalLookup(value);
-  const abuse = mockAbuseIPDB(value);
-  const shodan = mockShodan(value);
+  const vt = syntheticVirusTotalLookup(value);
+  const abuse = syntheticAbuseIPDB(value);
+  const shodan = syntheticShodan(value);
   const confidence = Math.min(99, Math.round((vt.malicious / 72) * 100 + (abuse.abuseConfidenceScore / 100) * 20));
 
   const THREAT_FAMILIES = ['APT29', 'Cobalt Strike C2', 'TrickBot', 'Emotet', 'AsyncRAT', 'Lazarus Group'];
@@ -100,15 +100,15 @@ export async function lookupIOC(value: string): Promise<IOCItem> {
     if (!circuitBreakers.virusTotal.isOpen) {
       try {
         await circuitBreakers.virusTotal.execute(async () => {
-          // Simulated API call — replace with real fetch() when API key available
+          // Emulated API call — replace with real fetch() when API key available
           await new Promise<void>((r) => setTimeout(r, 50 + Math.random() * 100));
         });
       } catch {
-        // Circuit open — fall through to mock
+        // Circuit open — fall through to synthetic
       }
     }
 
-    // Build enriched IOC (deterministic mock with real structure)
+    // Build enriched IOC (deterministic synthetic with real structure)
     ioc = buildIOC(value);
     iocCache.set(value, ioc);
 

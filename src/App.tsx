@@ -29,7 +29,7 @@ import {
   INITIAL_SETTINGS,
   INITIAL_EVIDENCE,
   INITIAL_DECISION,
-} from './data/mockData';
+} from './data/syntheticData';
 
 import {
   Incident,
@@ -67,7 +67,7 @@ export default function App() {
   const [systemHealth, setSystemHealth] = useState<SystemHealthMetrics>(INITIAL_SYSTEM_HEALTH);
   const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
 
-  // Live Server AI & Simulation State
+  // Live Server AI & Emulation State
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [isAIInvestigating, setIsAIInvestigating] = useState<boolean>(false);
   const [aiAnalysisOutput, setAiAnalysisOutput] = useState<string>('');
@@ -86,10 +86,10 @@ export default function App() {
     });
   }, []);
 
-  const handleSimulateThreat = async () => {
+  const handleEmulateThreat = async () => {
     setIsSimulating(true);
     try {
-      const res = await apiClient.triggerSimulation();
+      const res = await apiClient.triggerEmulation();
       if (res.success && res.incident) {
         const newInc = res.incident;
         setIncidents((prev) => [newInc, ...prev.filter((i) => i.id !== newInc.id)]);
@@ -107,7 +107,7 @@ export default function App() {
         ]);
       }
     } catch (err) {
-      console.error('Simulation error:', err);
+      console.error('Emulation error:', err);
     } finally {
       setIsSimulating(false);
     }
@@ -307,10 +307,10 @@ export default function App() {
     setDigitalTwinNodes((prev) =>
       prev.map((n) => {
         if (n.id === nodeId) {
-          const isNowIsolated = n.status !== 'ISOLATED' && n.status !== 'SIMULATED_ISOLATION';
+          const isNowIsolated = n.status !== 'ISOLATED' && n.status !== 'EMULATED_ISOLATION';
           return {
             ...n,
-            status: isNowIsolated ? 'SIMULATED_ISOLATION' : 'ACTIVE',
+            status: isNowIsolated ? 'EMULATED_ISOLATION' : 'ACTIVE',
           };
         }
         return n;
@@ -326,7 +326,7 @@ export default function App() {
     }));
   };
 
-  const handleResetSimulation = () => {
+  const handleResetEmulation = () => {
     setDigitalTwinNodes(INITIAL_NETWORK_NODES);
     setDigitalTwinState(INITIAL_DIGITAL_TWIN);
   };
@@ -378,7 +378,7 @@ export default function App() {
           activeWorkspace={activeWorkspace}
           onChangeWorkspace={setActiveWorkspace}
           onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-          onSimulateThreat={handleSimulateThreat}
+          onEmulateThreat={handleEmulateThreat}
           onResetStore={handleResetStore}
           isSimulating={isSimulating}
         />
@@ -390,7 +390,7 @@ export default function App() {
               incidents={incidents}
               systemHealth={systemHealth}
               onNavigateView={handleNavigateView}
-              onSimulateThreat={handleSimulateThreat}
+              onEmulateThreat={handleEmulateThreat}
             />
           )}
 
@@ -443,7 +443,7 @@ export default function App() {
               nodes={digitalTwinNodes}
               digitalTwinState={digitalTwinState}
               onToggleIsolationNode={handleToggleIsolationNode}
-              onResetSimulation={handleResetSimulation}
+              onResetEmulation={handleResetEmulation}
             />
           )}
 

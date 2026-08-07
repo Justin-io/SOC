@@ -1,11 +1,11 @@
 /**
- * AEGIS-X Backend — Digital Twin Simulation Engine
+ * AEGIS-X Backend — Digital Twin Emulation Engine
  * Clones network topology, applies containment modifications,
  * computes risk delta. Never modifies production state.
  */
 
-import type { NetworkNode, DigitalTwinState } from '../core/types.js';
-import { simulatePropagation } from '../chronon/graphEngine.js';
+import type { NetworkNode, DigitalTwinState, NodeStatus } from '../core/types.js';
+import { emulatePropagation } from '../chronon/graphEngine.js';
 import { getLogger } from '../core/logger.js';
 
 const log = getLogger('digital-twin:engine');
@@ -53,9 +53,9 @@ function estimateBusinessCost(victims: number, criticalCount: number): number {
   return victims * 2_000 + criticalCount * 500_000;
 }
 
-export interface SimulationDelta {
+export interface EmulationDelta {
   baseline: DigitalTwinState;
-  simulated: DigitalTwinState;
+  emulated: DigitalTwinState;
   delta: {
     riskReduction: number;
     victimReduction: number;
@@ -67,54 +67,54 @@ export interface SimulationDelta {
 }
 
 /**
- * Run a containment simulation by cloning the network state
+ * Run a containment emulation by cloning the network state
  * and applying isolation to selected nodes.
  * Returns delta risk — never modifies production state.
  */
-export function simulateContainment(
+export function emulateContainment(
   nodes: NetworkNode[],
   isolateNodeIds: string[]
-): SimulationDelta {
+): EmulationDelta {
   // Clone — deep copy to ensure no production state mutation
-  const productionNodes = nodes.map((n) => ({ ...n }));
-  const simulatedNodes = nodes.map((n) => ({
+  const productionNodes: NetworkNode[] = nodes.map((n) => ({ ...n }));
+  const emulatedNodes: NetworkNode[] = nodes.map((n) => ({
     ...n,
-    status: isolateNodeIds.includes(n.id) ? ('SIMULATED_ISOLATION' as const) : n.status,
+    status: (isolateNodeIds.includes(n.id) ? 'EMULATED_ISOLATION' : n.status) as NodeStatus,
   }));
 
   // Compute propagation on both
-  const productionPropagation = simulatePropagation(productionNodes);
-  const simulatedPropagation = simulatePropagation(simulatedNodes);
+  const productionPropagation = emulatePropagation(productionNodes);
+  const emulatedPropagation = emulatePropagation(emulatedNodes);
 
   // Apply propagation results to risk levels
-  const enrichedProduction = productionNodes.map((n) => {
+  const enrichedProduction: NetworkNode[] = productionNodes.map((n) => {
     const prop = productionPropagation.find((p) => p.nodeId === n.id);
     if (!prop) return n;
     return {
       ...n,
-      riskLevel: (prop.forecastedRisk >= 80 ? 'CRITICAL' :
-                  prop.forecastedRisk >= 60 ? 'DANGER' :
-                  prop.forecastedRisk >= 30 ? 'WARNING' : 'CLEAN') as NetworkNode['riskLevel'],
+      riskLevel: prop.forecastedRisk >= 80 ? 'CRITICAL' :
+        prop.forecastedRisk >= 60 ? 'DANGER' :
+          prop.forecastedRisk >= 30 ? 'WARNING' : 'CLEAN',
     };
   });
 
-  const enrichedSimulated = simulatedNodes.map((n) => {
-    const prop = simulatedPropagation.find((p) => p.nodeId === n.id);
+  const enrichedEmulated: NetworkNode[] = emulatedNodes.map((n) => {
+    const prop = emulatedPropagation.find((p) => p.nodeId === n.id);
     if (!prop) return n;
     return {
       ...n,
-      riskLevel: (prop.forecastedRisk >= 80 ? 'CRITICAL' :
-                  prop.forecastedRisk >= 60 ? 'DANGER' :
-                  prop.forecastedRisk >= 30 ? 'WARNING' : 'CLEAN') as NetworkNode['riskLevel'],
+      riskLevel: prop.forecastedRisk >= 80 ? 'CRITICAL' :
+        prop.forecastedRisk >= 60 ? 'DANGER' :
+          prop.forecastedRisk >= 30 ? 'WARNING' : 'CLEAN',
     };
   });
 
   const riskBefore = computeAggregateRisk(enrichedProduction);
-  const riskAfter = computeAggregateRisk(enrichedSimulated);
+  const riskAfter = computeAggregateRisk(enrichedEmulated);
   const victimsBefore = estimateVictims(enrichedProduction);
-  const victimsAfter = estimateVictims(enrichedSimulated);
+  const victimsAfter = estimateVictims(enrichedEmulated);
   const assetsBefore = countAffectedAssets(enrichedProduction);
-  const assetsAfter = countAffectedAssets(enrichedSimulated);
+  const assetsAfter = countAffectedAssets(enrichedEmulated);
   const costBefore = estimateBusinessCost(victimsBefore, assetsBefore);
   const costAfter = estimateBusinessCost(victimsAfter, assetsAfter);
   const containmentCost = isolateNodeIds.length * 25_000; // $25k per isolation action
@@ -136,7 +136,7 @@ export function simulateContainment(
     containmentEffectiveness: 0,
   };
 
-  const simulated: DigitalTwinState = {
+  const emulated: DigitalTwinState = {
     totalRiskBefore: riskBefore,
     totalRiskAfter: riskAfter,
     projectedVictimsBefore: victimsBefore,
@@ -149,7 +149,7 @@ export function simulateContainment(
     containmentEffectiveness: effectiveness,
   };
 
-  log.info('Digital twin simulation complete', {
+  log.info('Digital twin emulation complete', {
     meta: {
       isolatedCount: isolateNodeIds.length,
       riskReduction: riskBefore - riskAfter,
@@ -159,7 +159,7 @@ export function simulateContainment(
 
   return {
     baseline,
-    simulated,
+    emulated,
     delta: {
       riskReduction: riskBefore - riskAfter,
       victimReduction: victimsBefore - victimsAfter,

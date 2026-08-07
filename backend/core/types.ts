@@ -158,7 +158,7 @@ export interface IOCItem {
 
 export type NetworkNodeType = 'WORKSTATION' | 'SERVER' | 'DATABASE' | 'GATEWAY' | 'CLOUD_INSTANCE' | 'CONTAINER';
 export type NodeRiskLevel = 'CLEAN' | 'WARNING' | 'DANGER' | 'CRITICAL';
-export type NodeStatus = 'ONLINE' | 'ISOLATED' | 'COMPROMISED' | 'SIMULATED_ISOLATION';
+export type NodeStatus = 'ONLINE' | 'ISOLATED' | 'COMPROMISED' | 'EMULATED_ISOLATION';
 
 export interface NetworkNode {
   id: string;

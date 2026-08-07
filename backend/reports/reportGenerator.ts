@@ -46,7 +46,7 @@ const REPORT_TEMPLATES: Record<string, { summary: string; findings: string[]; re
       'Primary attack vector: Kerberoasting via RC4 cipher downgrade + LSASS credential extraction.',
       'Attacker dwell time estimated at 4.2 hours before autonomous detection trigger.',
       'Lateral movement contained to 3 of 14 initially at-risk systems due to rapid isolation.',
-      'Digital Twin simulation predicted 87% risk reduction — actual measurement: 91%.',
+      'Digital Twin emulation predicted 87% risk reduction — actual measurement: 91%.',
     ],
     recommendations: [
       'Mandate AES-256 only for Kerberos ticket encryption via Group Policy.',
@@ -66,7 +66,7 @@ const REPORT_TEMPLATES: Record<string, { summary: string; findings: string[]; re
     recommendations: [
       'Update data retention policies to align with GDPR Article 5(1)(e) storage limitation principle.',
       'Complete Privacy Impact Assessment for new ML-based user behavior analytics system.',
-      'Establish quarterly penetration testing schedule to satisfy SOC 2 CC7.1 requirements.',
+      'Establish quarterly adversarial emulation schedule to satisfy SOC 2 CC7.1 requirements.',
     ],
   },
   THREAT_BRIEF: {

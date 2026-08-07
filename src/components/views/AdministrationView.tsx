@@ -3,17 +3,15 @@ import {
   Sliders,
   Save,
   Bot,
-  ShieldCheck,
   Server,
-  Zap,
   Key,
   Database,
-  CheckCircle2,
-  RefreshCw,
+  FileText,
 } from 'lucide-react';
 import { SystemSettings, AgentMetrics, AgentRole } from '../../types/soc';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
+import { MathSpecDoc } from './MathSpecDoc';
 
 interface AdministrationViewProps {
   settings: SystemSettings;
@@ -32,12 +30,17 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 }) => {
   const [localSettings, setLocalSettings] = useState<SystemSettings>(settings);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [showMathSpecPage, setShowMathSpecPage] = useState(false);
 
   const handleSave = () => {
     onSaveSettings(localSettings);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
   };
+
+  if (showMathSpecPage) {
+    return <MathSpecDoc onBack={() => setShowMathSpecPage(false)} />;
+  }
 
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto font-sans">
@@ -57,6 +60,10 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
               Settings Saved
             </span>
           )}
+          <Button variant="secondary" size="sm" onClick={() => setShowMathSpecPage(true)}>
+            <FileText size={14} className="mr-1.5" />
+            <span>Math & Algo Docs</span>
+          </Button>
           <Button variant="primary" size="sm" onClick={handleSave}>
             <Save size={14} className="mr-1.5" />
             <span>Save Control Parameters</span>
@@ -251,6 +258,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
           </Card>
         </div>
       </div>
+
     </div>
   );
 };

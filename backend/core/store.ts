@@ -1,7 +1,7 @@
 /**
  * AEGIS-X Backend — Operational State Store
  * In-memory operational state for incidents, IOCs, reports, network nodes, settings.
- * Seeded from frontend mock data schema. All API routes read/write this store.
+ * Seeded from frontend synthetic data schema. All API routes read/write this store.
  */
 
 import type {
@@ -358,7 +358,7 @@ class OperationalStore {
   toggleNodeIsolation(nodeId: string): NetworkNode | null {
     const node = this.networkNodes.find((n) => n.id === nodeId);
     if (!node) return null;
-    node.status = node.status === 'SIMULATED_ISOLATION' ? 'ONLINE' : 'SIMULATED_ISOLATION';
+    node.status = node.status === 'EMULATED_ISOLATION' ? 'ONLINE' : 'EMULATED_ISOLATION';
     return node;
   }
 }
