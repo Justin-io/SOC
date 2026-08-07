@@ -635,7 +635,7 @@ export const INITIAL_AUDIT_BLOCKS: AuditBlock[] = [
     timestamp: '2026-08-07T05:22:00Z',
     hash: '0x6d0a7b9c1d3e5f7a8b0c2d4e6f8a0b2c4d6e8f0a2b4c6d8e0f2a4b6c8d0e2f4a',
     previousHash: '0x5c9a6b8c0d2e4f6a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a',
-    actor: 'Security Analyst: Sarah Chen (Senior SOC Lead)',
+    actor: 'SOC Lead: Hari Nandan K & Anjaleena Francis',
     actorType: 'HUMAN',
     action: 'APPROVE_CONTAINMENT_OVERRIDE',
     incidentId: 'INC-2026-9039',

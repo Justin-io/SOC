@@ -244,9 +244,9 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div className="hidden xl:flex flex-col text-left">
               <span className="font-semibold text-xs text-[#111111] leading-tight">
-                Sarah Chen
+                Hari Nandan K & Anjaleena Francis
               </span>
-              <span className="text-[10px] text-[#737373]">Lead SOC Operator</span>
+              <span className="text-[10px] text-[#737373]">SOC Leads & Operations</span>
             </div>
           </div>
         </div>

@@ -202,7 +202,7 @@ export default function App() {
       hash: `0x${Math.random().toString(16).slice(2, 10)}${Math.random().toString(16).slice(2, 10)}`,
       previousHash: auditBlocks[auditBlocks.length - 1]?.hash || '0x000000',
       timestamp: new Date().toISOString(),
-      actor: 'HUMAN_OPERATOR (harinandhan972)',
+      actor: 'SOC_OPERATOR (Hari Nandan K & Anjaleena Francis)',
       actorType: 'HUMAN',
       action: `INCIDENT_STATUS_CHANGE [${id} -> ${newStatus}]`,
       details: { incidentId: id, status: newStatus },
