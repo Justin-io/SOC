@@ -167,6 +167,6 @@ export function simulateContainment(
       costSavings: costBefore - costAfter - containmentCost,
       containmentEffectiveness: effectiveness,
     },
-    isolatedNodeIds,
+    isolatedNodeIds: isolateNodeIds,
   };
 }
