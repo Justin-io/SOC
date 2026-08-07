@@ -126,6 +126,12 @@ export const IncidentRoomView: React.FC<IncidentRoomViewProps> = ({
     ratio: number;
   } | null>(null);
 
+  React.useEffect(() => {
+    if (aiAnalysisOutput) {
+      setActiveBottomTab('AI');
+    }
+  }, [aiAnalysisOutput]);
+
   // Generate React Flow nodes and edges based on 10 AI Agents
   const initialNodes: Node[] = useMemo(() => {
     const roles: AgentRole[] = [

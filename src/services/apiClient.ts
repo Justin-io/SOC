@@ -263,6 +263,62 @@ class AEGISApiClient {
     }
   }
 
+  public async fetchEvidence(incidentId: string): Promise<EvidenceItem[]> {
+    try {
+      const res = await fetch(`/api/v1/incidents/${incidentId}/evidence`);
+      const json = await this.safeJson<any>(res);
+      if (json && json.success && Array.isArray(json.data) && json.data.length > 0) {
+        return json.data;
+      }
+    } catch (err) {
+      console.warn('Fetch evidence failed:', err);
+    }
+    return this.getInitialEvidence();
+  }
+
+  public async fetchDecision(incidentId: string): Promise<DecisionIntelligence> {
+    try {
+      const res = await fetch(`/api/v1/decisions/${incidentId}`);
+      const json = await this.safeJson<any>(res);
+      if (json && json.success && json.data) {
+        return json.data;
+      }
+    } catch (err) {
+      console.warn('Fetch decision failed:', err);
+    }
+    return this.getInitialDecision();
+  }
+
+  public async approveDecision(incidentId: string, action: string, notes?: string): Promise<DecisionIntelligence | null> {
+    try {
+      const res = await fetch(`/api/v1/decisions/${incidentId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, notes }),
+      });
+      const json = await this.safeJson<any>(res);
+      if (json && json.success && json.data) {
+        return json.data;
+      }
+    } catch (err) {
+      console.warn('Approve decision failed:', err);
+    }
+    return null;
+  }
+
+  public async updateIncidentStatus(incidentId: string, status: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/v1/incidents/${incidentId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
   // Baseline data getters
   public getInitialIncidents(): Incident[] { return [...INITIAL_INCIDENTS]; }
   public getInitialAgents(): AgentMetrics[] { return [...INITIAL_AGENTS]; }

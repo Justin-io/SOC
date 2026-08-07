@@ -36,6 +36,8 @@ import {
   IncidentStatus,
   AgentRole,
   AgentMetrics,
+  EvidenceItem,
+  DecisionIntelligence,
   SystemSettings,
   SOCReport,
   AuditBlock,
@@ -59,6 +61,8 @@ export default function App() {
   // Core State
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [agents, setAgents] = useState<AgentMetrics[]>(INITIAL_AGENTS);
+  const [activeEvidence, setActiveEvidence] = useState<EvidenceItem[]>(INITIAL_EVIDENCE);
+  const [activeDecision, setActiveDecision] = useState<DecisionIntelligence>(INITIAL_DECISION);
   const [iocs, setIocs] = useState(INITIAL_IOCS);
   const [reports, setReports] = useState<SOCReport[]>(INITIAL_REPORTS);
   const [auditBlocks, setAuditBlocks] = useState<AuditBlock[]>(INITIAL_AUDIT_BLOCKS);
@@ -85,6 +89,13 @@ export default function App() {
       }
     });
   }, []);
+
+  // Fetch Evidence & Decision when selected incident changes
+  useEffect(() => {
+    if (!selectedIncidentId) return;
+    apiClient.fetchEvidence(selectedIncidentId).then(setActiveEvidence);
+    apiClient.fetchDecision(selectedIncidentId).then(setActiveDecision);
+  }, [selectedIncidentId]);
 
   const handleEmulateThreat = async () => {
     setIsSimulating(true);
@@ -198,11 +209,25 @@ export default function App() {
     setAuditBlocks((prev) => [newBlock, ...prev]);
   };
 
-  const handleApproveDecision = (
+  const handleApproveDecision = async (
     action: 'APPROVED' | 'REJECTED' | 'MODIFIED' | 'ESCALATED',
     notes?: string
   ) => {
-    handleUpdateIncidentStatus(selectedIncidentId, action === 'APPROVED' ? 'CONTAINED' : 'RESOLVED');
+    const newStatus = action === 'APPROVED' ? 'CONTAINED' : 'RESOLVED';
+    handleUpdateIncidentStatus(selectedIncidentId, newStatus);
+    apiClient.updateIncidentStatus(selectedIncidentId, newStatus);
+
+    const updatedDecision = await apiClient.approveDecision(selectedIncidentId, action, notes);
+    if (updatedDecision) {
+      setActiveDecision(updatedDecision);
+    } else {
+      setActiveDecision((prev) => ({
+        ...prev,
+        approvalStatus: action,
+        approvedBy: 'HUMAN_OPERATOR',
+        approvalTimestamp: new Date().toISOString(),
+      }));
+    }
 
     setNotifications((prev) => [
       {
@@ -220,22 +245,9 @@ export default function App() {
   const handleRunAIInvestigation = async (inc: Incident) => {
     setIsAIInvestigating(true);
     try {
-      const res = await fetch('/api/investigate/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          incidentTitle: inc.title,
-          incidentDescription: inc.description,
-          mitreTechnique: `${inc.mitreTechnique.id} - ${inc.mitreTechnique.name}`,
-          rawEvidence: inc.description,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.analysis) {
-        setAiAnalysisOutput(data.analysis);
-      } else if (data.mitigationPlan) {
-        setAiAnalysisOutput(data.mitigationPlan);
+      const res = await apiClient.runAIInvestigation(inc, activeEvidence);
+      if (res && res.analysis) {
+        setAiAnalysisOutput(res.analysis);
       }
     } catch {
       setAiAnalysisOutput('Server investigation request timed out. Deterministic evaluation: Kerberoasting attack vector confirmed across domain controller logs.');
@@ -393,8 +405,8 @@ export default function App() {
               allIncidents={incidents}
               onSelectIncident={(id) => setSelectedIncidentId(id)}
               agents={agents}
-              evidenceList={INITIAL_EVIDENCE}
-              decision={INITIAL_DECISION}
+              evidenceList={activeEvidence}
+              decision={activeDecision}
               onApproveDecision={handleApproveDecision}
               onRunAIInvestigation={handleRunAIInvestigation}
               isAIInvestigating={isAIInvestigating}
