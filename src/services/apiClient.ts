@@ -187,6 +187,50 @@ class AEGISApiClient {
     };
   }
 
+  public async fetchIncidents(): Promise<Incident[]> {
+    try {
+      const res = await fetch('/api/v1/incidents');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data && Array.isArray(json.data.items)) {
+          return json.data.items;
+        }
+      }
+    } catch (err) {
+      console.warn('Fetch incidents failed:', err);
+    }
+    return [];
+  }
+
+  public async triggerSimulation(): Promise<{
+    success: boolean;
+    incident?: Incident;
+    evidence?: EvidenceItem[];
+    decision?: DecisionIntelligence;
+  }> {
+    try {
+      const res = await fetch('/api/v1/simulate', { method: 'POST' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          return json.data;
+        }
+      }
+    } catch (err) {
+      console.error('Trigger simulation failed:', err);
+    }
+    return { success: false };
+  }
+
+  public async resetStore(): Promise<boolean> {
+    try {
+      const res = await fetch('/api/v1/reset', { method: 'POST' });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
   // Baseline data getters
   public getInitialIncidents(): Incident[] { return [...INITIAL_INCIDENTS]; }
   public getInitialAgents(): AgentMetrics[] { return [...INITIAL_AGENTS]; }

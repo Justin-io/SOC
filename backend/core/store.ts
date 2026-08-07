@@ -301,16 +301,39 @@ const SEED_SETTINGS: SOCSettings = {
   },
 };
 
+const HAS_API_KEY = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY' && process.env.GEMINI_API_KEY.length > 5);
+
 // ─── Mutable State ────────────────────────────────────────────────────────────
 
 class OperationalStore {
-  public incidents: Incident[] = [...SEED_INCIDENTS];
-  public iocs: IOCItem[] = [...SEED_IOCS];
+  public incidents: Incident[] = HAS_API_KEY ? [] : [...SEED_INCIDENTS];
+  public iocs: IOCItem[] = HAS_API_KEY ? [] : [...SEED_IOCS];
   public reports: SOCReport[] = [];
   public networkNodes: NetworkNode[] = [...SEED_NETWORK_NODES];
-  public evidence: EvidenceItem[] = [...SEED_EVIDENCE];
-  public decision: DecisionIntelligence = { ...SEED_DECISION };
+  public evidence: EvidenceItem[] = HAS_API_KEY ? [] : [...SEED_EVIDENCE];
+  public decision: DecisionIntelligence = HAS_API_KEY
+    ? {
+        incidentId: '',
+        finalProbability: 0,
+        dissentLevel: 'NONE',
+        dissentAgents: [],
+        riskScore: 0,
+        confidenceScore: 0,
+        recommendedAction: 'Awaiting telemetry ingestion.',
+        counterfactualExplanation: 'No active incident.',
+        businessImpact: 'Nominal operational status.',
+        containmentImpact: 'No containment active.',
+        approvalStatus: 'PENDING',
+      }
+    : { ...SEED_DECISION };
   public settings: SOCSettings = { ...SEED_SETTINGS };
+
+  public clearAll(): void {
+    this.incidents = [];
+    this.iocs = [];
+    this.evidence = [];
+    this.reports = [];
+  }
 
   // Helpers
   getIncident(id: string): Incident | null {

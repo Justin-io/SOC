@@ -44,6 +44,8 @@ import {
   SystemHealthMetrics,
 } from './types/soc';
 
+import { apiClient } from './services/apiClient';
+
 export default function App() {
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
   const [selectedIncidentId, setSelectedIncidentId] = useState<string>('INC-2026-9041');
@@ -55,7 +57,7 @@ export default function App() {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState<boolean>(false);
 
   // Core State
-  const [incidents, setIncidents] = useState<Incident[]>(INITIAL_INCIDENTS);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
   const [agents, setAgents] = useState<AgentMetrics[]>(INITIAL_AGENTS);
   const [iocs, setIocs] = useState(INITIAL_IOCS);
   const [reports, setReports] = useState<SOCReport[]>(INITIAL_REPORTS);
@@ -65,30 +67,57 @@ export default function App() {
   const [systemHealth, setSystemHealth] = useState<SystemHealthMetrics>(INITIAL_SYSTEM_HEALTH);
   const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
 
-  // Live Server AI State
+  // Live Server AI & Simulation State
+  const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [isAIInvestigating, setIsAIInvestigating] = useState<boolean>(false);
   const [aiAnalysisOutput, setAiAnalysisOutput] = useState<string>('');
   const [isGeneratingReport, setIsGeneratingReport] = useState<boolean>(false);
 
   // Notification Bus State
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
-    {
-      id: 'NOTIF-1',
-      title: 'CRITICAL Kerberoasting Attack Detected',
-      message: 'Active Directory Domain Controller DC01-PROD-EAST flagged high probability golden ticket extraction.',
-      timestamp: 'Just now',
-      severity: 'CRITICAL',
-      read: false,
-    },
-    {
-      id: 'NOTIF-2',
-      title: 'Autonomous Containment Staged',
-      message: 'Fusion Engine generated isolation directive for host WRK-FINANCE-09 awaiting SLA approval.',
-      timestamp: '2m ago',
-      severity: 'HIGH',
-      read: false,
-    },
-  ]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+
+  // Initial fetch from backend API
+  useEffect(() => {
+    apiClient.fetchIncidents().then((fetched) => {
+      setIncidents(fetched);
+      if (fetched.length > 0) {
+        setSelectedIncidentId(fetched[0].id);
+      }
+    });
+  }, []);
+
+  const handleSimulateThreat = async () => {
+    setIsSimulating(true);
+    try {
+      const res = await apiClient.triggerSimulation();
+      if (res.success && res.incident) {
+        const newInc = res.incident;
+        setIncidents((prev) => [newInc, ...prev.filter((i) => i.id !== newInc.id)]);
+        setSelectedIncidentId(newInc.id);
+        setNotifications((prev) => [
+          {
+            id: `NOTIF-${Date.now()}`,
+            title: `Live Threat Ingested: ${newInc.title}`,
+            message: `Asset ${newInc.asset.hostname} (${newInc.asset.ip}) under active investigation by 10 autonomous agents.`,
+            timestamp: 'Just now',
+            severity: newInc.severity,
+            read: false,
+          },
+          ...prev,
+        ]);
+      }
+    } catch (err) {
+      console.error('Simulation error:', err);
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  const handleResetStore = async () => {
+    await apiClient.resetStore();
+    setIncidents([]);
+    setNotifications([]);
+  };
 
   const activeIncident = incidents.find((i) => i.id === selectedIncidentId) || incidents[0];
 
@@ -126,6 +155,20 @@ export default function App() {
             },
             ...prev.slice(0, 19),
           ]);
+        } catch {
+          // ignore
+        }
+      });
+
+      eventSource.addEventListener('incident_update', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.incident) {
+            setIncidents((prev) => [data.incident, ...prev.filter((i) => i.id !== data.incident.id)]);
+            setSelectedIncidentId(data.incident.id);
+          } else if (data.type === 'STORE_RESET') {
+            setIncidents([]);
+          }
         } catch {
           // ignore
         }
@@ -335,6 +378,9 @@ export default function App() {
           activeWorkspace={activeWorkspace}
           onChangeWorkspace={setActiveWorkspace}
           onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          onSimulateThreat={handleSimulateThreat}
+          onResetStore={handleResetStore}
+          isSimulating={isSimulating}
         />
 
         {/* Primary Content Router Area */}
@@ -344,6 +390,7 @@ export default function App() {
               incidents={incidents}
               systemHealth={systemHealth}
               onNavigateView={handleNavigateView}
+              onSimulateThreat={handleSimulateThreat}
             />
           )}
 

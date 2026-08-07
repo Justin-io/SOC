@@ -21,12 +21,14 @@ interface DashboardViewProps {
   incidents: Incident[];
   systemHealth: SystemHealthMetrics;
   onNavigateView: (view: ViewType, incidentId?: string) => void;
+  onSimulateThreat?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   incidents,
   systemHealth,
   onNavigateView,
+  onSimulateThreat,
 }) => {
   const activeIncidents = incidents.filter((i) => i.status !== 'RESOLVED' && i.status !== 'FALSE_POSITIVE');
   const criticalIncidents = incidents.filter((i) => i.severity === 'CRITICAL' && i.status !== 'RESOLVED');
@@ -163,57 +165,80 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
 
-          <div className="bg-white border border-[#E5E5E5] rounded-md overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-[#FAFAFA] border-b border-[#E5E5E5] font-mono text-[#737373] uppercase text-[10px]">
-                  <tr>
-                    <th className="py-2.5 px-4 font-semibold">Incident ID</th>
-                    <th className="py-2.5 px-4 font-semibold">Severity</th>
-                    <th className="py-2.5 px-4 font-semibold">Target Asset</th>
-                    <th className="py-2.5 px-4 font-semibold">Source & Detector</th>
-                    <th className="py-2.5 px-4 font-semibold">MITRE Technique</th>
-                    <th className="py-2.5 px-4 font-semibold">Status</th>
-                    <th className="py-2.5 px-4 font-semibold text-right">Confidence</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E5E5E5] font-mono">
-                  {incidents.map((inc) => (
-                    <tr
-                      key={inc.id}
-                      onClick={() => onNavigateView('incident-room', inc.id)}
-                      className="hover:bg-[#FAFAFA] cursor-pointer transition-colors group"
-                    >
-                      <td className="py-3 px-4 font-bold text-[#111111] group-hover:underline">
-                        {inc.id}
-                      </td>
-                      <td className="py-3 px-4">
-                        <Badge severity={inc.severity} />
-                      </td>
-                      <td className="py-3 px-4 text-[#111111]">
-                        <div className="font-semibold">{inc.asset.hostname}</div>
-                        <div className="text-[10px] text-[#737373]">{inc.asset.ip}</div>
-                      </td>
-                      <td className="py-3 px-4 text-[#525252] truncate max-w-[180px]">
-                        {inc.source}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="bg-[#F4F4F5] border border-[#E5E5E5] px-1.5 py-0.5 rounded text-[10px] font-mono text-[#111111]">
-                          {inc.mitreTechnique.id}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Badge status={inc.status} />
-                      </td>
-                      <td className="py-3 px-4 text-right font-bold text-[#111111]">
-                        {inc.confidence}%
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {incidents.length === 0 ? (
+            <div className="bg-white border border-[#E5E5E5] rounded-md p-10 text-center space-y-4 shadow-xs">
+              <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto">
+                <ShieldAlert size={24} />
+              </div>
+              <div className="max-w-md mx-auto space-y-1">
+                <h3 className="text-base font-bold text-[#111111]">SOC Nominal — Zero Active Incidents</h3>
+                <p className="text-xs text-[#737373] font-mono">
+                  All enterprise assets are nominal. Ingest live telemetry or trigger a threat simulation to run the AI multi-agent cascade.
+                </p>
+              </div>
+              {onSimulateThreat && (
+                <button
+                  onClick={onSimulateThreat}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded bg-[#111111] hover:bg-[#262626] text-white font-mono font-bold text-xs transition-colors shadow-sm cursor-pointer"
+                >
+                  <Zap size={14} className="text-amber-400 fill-amber-400" />
+                  <span>Ingest Telemetry & Simulate Live Threat</span>
+                </button>
+              )}
             </div>
-          </div>
+          ) : (
+            <div className="bg-white border border-[#E5E5E5] rounded-md overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#FAFAFA] border-b border-[#E5E5E5] font-mono text-[#737373] uppercase text-[10px]">
+                    <tr>
+                      <th className="py-2.5 px-4 font-semibold">Incident ID</th>
+                      <th className="py-2.5 px-4 font-semibold">Severity</th>
+                      <th className="py-2.5 px-4 font-semibold">Target Asset</th>
+                      <th className="py-2.5 px-4 font-semibold">Source & Detector</th>
+                      <th className="py-2.5 px-4 font-semibold">MITRE Technique</th>
+                      <th className="py-2.5 px-4 font-semibold">Status</th>
+                      <th className="py-2.5 px-4 font-semibold text-right">Confidence</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E5E5E5] font-mono">
+                    {incidents.map((inc) => (
+                      <tr
+                        key={inc.id}
+                        onClick={() => onNavigateView('incident-room', inc.id)}
+                        className="hover:bg-[#FAFAFA] cursor-pointer transition-colors group"
+                      >
+                        <td className="py-3 px-4 font-bold text-[#111111] group-hover:underline">
+                          {inc.id}
+                        </td>
+                        <td className="py-3 px-4">
+                          <Badge severity={inc.severity} />
+                        </td>
+                        <td className="py-3 px-4 text-[#111111]">
+                          <div className="font-semibold">{inc.asset.hostname}</div>
+                          <div className="text-[10px] text-[#737373]">{inc.asset.ip}</div>
+                        </td>
+                        <td className="py-3 px-4 text-[#525252] truncate max-w-[180px]">
+                          {inc.source}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="bg-[#F4F4F5] border border-[#E5E5E5] px-1.5 py-0.5 rounded text-[10px] font-mono text-[#111111]">
+                            {inc.mitreTechnique.id}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <Badge status={inc.status} />
+                        </td>
+                        <td className="py-3 px-4 text-right font-bold text-[#111111]">
+                          {inc.confidence}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right: Infrastructure & API System Health Panel (1 Col) */}

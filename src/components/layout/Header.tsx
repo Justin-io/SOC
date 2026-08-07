@@ -11,6 +11,9 @@ import {
   AlertTriangle,
   RefreshCw,
   PanelLeft,
+  Zap,
+  Loader2,
+  RotateCcw,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -23,6 +26,9 @@ interface HeaderProps {
   onChangeWorkspace: (ws: string) => void;
   onRefreshData?: () => void;
   onToggleSidebar?: () => void;
+  onSimulateThreat?: () => void;
+  onResetStore?: () => void;
+  isSimulating?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -35,6 +41,9 @@ export const Header: React.FC<HeaderProps> = ({
   onChangeWorkspace,
   onRefreshData,
   onToggleSidebar,
+  onSimulateThreat,
+  onResetStore,
+  isSimulating = false,
 }) => {
   const [timeString, setTimeString] = useState<string>('');
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
@@ -175,6 +184,39 @@ export const Header: React.FC<HeaderProps> = ({
               </>
             )}
           </div>
+
+          {/* Simulate Threat Trigger Button */}
+          {onSimulateThreat && (
+            <button
+              onClick={onSimulateThreat}
+              disabled={isSimulating}
+              className="flex items-center gap-1.5 px-3 py-1 rounded bg-[#111111] hover:bg-[#262626] disabled:bg-[#525252] text-white font-mono font-bold text-xs transition-colors shadow-sm cursor-pointer"
+              title="Ingest Realtime Telemetry & Run AI Multi-Agent Cascade"
+            >
+              {isSimulating ? (
+                <>
+                  <Loader2 size={13} className="animate-spin text-amber-400" />
+                  <span className="hidden sm:inline text-amber-300">INGESTING...</span>
+                </>
+              ) : (
+                <>
+                  <Zap size={13} className="text-amber-400 fill-amber-400" />
+                  <span className="hidden sm:inline">SIMULATE THREAT</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Reset Store Button */}
+          {onResetStore && (
+            <button
+              onClick={onResetStore}
+              className="p-1 rounded border border-[#E5E5E5] bg-[#FAFAFA] hover:bg-[#F5F5F5] text-[#737373] hover:text-[#111111] transition-colors"
+              title="Reset Console to Clean State"
+            >
+              <RotateCcw size={13} />
+            </button>
+          )}
 
           {/* Clock */}
           <div className="hidden xl:block text-[#525252] text-[11px] font-mono">

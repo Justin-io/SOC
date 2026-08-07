@@ -53,6 +53,7 @@ import { config } from './backend/core/config.js';
 import { getLogger } from './backend/core/logger.js';
 import { toHttpError } from './backend/core/errors.js';
 import { store } from './backend/core/store.js';
+import type { Incident, EvidenceItem } from './backend/core/types.js';
 
 // ─── Subsystems ─────────────────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ function getAI(): GoogleGenAI | null {
     if (key) {
       aiClient = new GoogleGenAI({
         apiKey: key,
-        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+        httpOptions: { headers: { 'User-Agent': 'aegis-x-backend/1.0' } },
       });
     }
   }
@@ -360,6 +361,195 @@ app.get('/api/v1/investigations/:id', (req: Request, res: Response) => {
 app.get('/api/v1/investigations', (_req: Request, res: Response) => {
   const all = Array.from(investigations.values());
   res.json({ success: true, data: all, timestamp: new Date().toISOString() });
+});
+
+// ─── Simulation & Telemetry Trigger ─────────────────────────────────────────
+
+app.post(['/api/v1/simulate', '/api/simulate'], async (_req: Request, res: Response) => {
+  try {
+    const ai = getAI();
+    const id = `INC-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
+
+    let title = 'Kerberoasting & LSASS Memory Extraction on Domain Controller';
+    let description = 'Suspicious memory dump process executed against lsass.exe followed by Kerberos ticket request TGS-REQ with RC4 encryption.';
+    let mitreId = 'T1003.001';
+    let mitreName = 'OS Credential Dumping: LSASS Memory';
+    let mitreTactic = 'Credential Access';
+    let severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' = 'CRITICAL';
+    let hostname = 'DC01-PROD-EAST';
+    let ip = '10.142.4.10';
+
+    if (ai) {
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.0-flash',
+          contents: `Generate a realistic enterprise cyber security incident for AEGIS-X SOC. Respond in JSON only:
+{"title":"string","description":"string","severity":"CRITICAL|HIGH|MEDIUM","hostname":"string","ip":"string","mitreId":"string","mitreName":"string","mitreTactic":"string"}`,
+          config: { temperature: 0.7, maxOutputTokens: 250 },
+        });
+        const match = response.text?.match(/\{[\s\S]*\}/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          title = parsed.title || title;
+          description = parsed.description || description;
+          severity = (['CRITICAL', 'HIGH', 'MEDIUM'].includes(parsed.severity) ? parsed.severity : 'CRITICAL') as any;
+          hostname = parsed.hostname || hostname;
+          ip = parsed.ip || ip;
+          mitreId = parsed.mitreId || mitreId;
+          mitreName = parsed.mitreName || mitreName;
+          mitreTactic = parsed.mitreTactic || mitreTactic;
+        }
+      } catch (err) {
+        log.warn('Simulate AI generation fallback:', err);
+      }
+    }
+
+    const incident: Incident = {
+      id,
+      title,
+      severity,
+      status: 'INVESTIGATING',
+      asset: {
+        id: `AST-${Math.floor(Math.random() * 900 + 100)}`,
+        hostname,
+        ip,
+        type: hostname.includes('DC') ? 'Domain Controller' : hostname.includes('aws') ? 'Cloud Instance' : 'Server',
+        criticality: severity === 'CRITICAL' ? 'CRITICAL' : 'HIGH',
+        owner: 'Security Operations',
+      },
+      source: ai ? 'Gemini AI Telemetry Engine' : 'CrowdStrike EDR + Active Directory Audit',
+      mitreTechnique: { id: mitreId, name: mitreName, tactic: mitreTactic },
+      confidence: Math.floor(Math.random() * 10 + 88),
+      riskScore: Math.floor(Math.random() * 12 + 85),
+      dissentScore: Math.floor(Math.random() * 15 + 5),
+      timestamp: new Date().toISOString(),
+      description,
+      assignedAgent: 'COORDINATOR',
+      affectedSystemsCount: Math.floor(Math.random() * 10 + 3),
+      containmentImpact: `Isolating ${hostname} will trigger automated rollover. Expected minimal service disruption.`,
+      businessImpact: `High risk of administrative compromise across domain systems.`,
+      recommendedAction: `Isolate host ${hostname} immediately, revoke session tokens, force credential rotation.`,
+      counterfactualExplanation: `Without process memory dump evidence, threat confidence drops significantly.`,
+      likelihoodRatio: 16.8,
+    };
+
+    store.incidents.unshift(incident);
+
+    const newEvidence: EvidenceItem[] = [
+      {
+        id: `EVD-${Date.now()}-1`,
+        incidentId: id,
+        timestamp: new Date().toISOString(),
+        type: 'MEMORY',
+        source: 'EDR Agent',
+        rawContent: `Process memory dump detected targeting memory space of ${hostname} (${ip}). Signature match: SIGMA-MEMORY-DUMP.`,
+        weight: 10,
+        confidence: incident.confidence,
+        mitreId,
+        toolUsed: 'EDR Memory Guard',
+        flaggedByAgent: 'MALWARE',
+      },
+      {
+        id: `EVD-${Date.now()}-2`,
+        incidentId: id,
+        timestamp: new Date().toISOString(),
+        type: 'AUTH',
+        source: 'Identity Provider',
+        rawContent: `Anomalous authentication request originating from ${ip}. Cipher downgrade to RC4 detected.`,
+        weight: 9,
+        confidence: incident.confidence - 2,
+        mitreId,
+        toolUsed: 'Identity Audit',
+        flaggedByAgent: 'THREAT_INTEL',
+      },
+      {
+        id: `EVD-${Date.now()}-3`,
+        incidentId: id,
+        timestamp: new Date().toISOString(),
+        type: 'NETWORK',
+        source: 'Perimeter Gateway',
+        rawContent: `Outbound beacon to external IP 185.220.101.45 (Tor Exit Node) detected from ${hostname}.`,
+        weight: 8,
+        confidence: incident.confidence - 4,
+        mitreId: 'T1071',
+        toolUsed: 'NGFW Sentinel',
+        flaggedByAgent: 'CLOUD',
+      },
+    ];
+
+    store.evidence.unshift(...newEvidence);
+
+    store.decision = {
+      incidentId: id,
+      finalProbability: incident.confidence,
+      dissentLevel: 'LOW',
+      dissentAgents: ['EDGE'],
+      riskScore: incident.riskScore,
+      confidenceScore: incident.confidence - 3,
+      recommendedAction: incident.recommendedAction,
+      counterfactualExplanation: incident.counterfactualExplanation,
+      businessImpact: incident.businessImpact,
+      containmentImpact: incident.containmentImpact,
+      approvalStatus: 'PENDING',
+    };
+
+    const alertRecord = normalizeAlert({ ...incident }, 'REST');
+    const investigationState = await startInvestigation(alertRecord);
+
+    sseBus.publish('incident_update', {
+      type: 'SIMULATION_TRIGGERED',
+      incidentId: id,
+      incident,
+      timestamp: new Date().toISOString(),
+    });
+
+    sseBus.publish('live_event', {
+      id: `EVT-${Date.now().toString().slice(-6)}`,
+      timestamp: new Date().toISOString(),
+      asset: hostname,
+      technique: { id: mitreId, name: mitreName },
+      severity,
+      confidence: incident.confidence,
+      source: 'AEGIS-X Realtime Simulation Bus',
+    });
+
+    auditChain.append({
+      actor: 'SIMULATOR',
+      actorType: 'AI_AGENT',
+      action: `SIMULATION_INGESTED [${id}] ${title}`,
+      incidentId: id,
+      details: { severity, mitreId, hostname },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        incident,
+        evidence: newEvidence,
+        decision: store.decision,
+        investigation: investigationState,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    log.error('Simulation error:', err);
+    res.status(500).json({ success: false, error: 'Simulation failed', timestamp: new Date().toISOString() });
+  }
+});
+
+app.post(['/api/v1/reset', '/api/reset'], (_req: Request, res: Response) => {
+  store.clearAll();
+  auditChain.append({
+    actor: 'HUMAN_OPERATOR',
+    actorType: 'HUMAN',
+    action: 'STORE_RESET_CLEAN',
+    details: { timestamp: new Date().toISOString() },
+  });
+  sseBus.publish('incident_update', {
+    type: 'STORE_RESET',
+    timestamp: new Date().toISOString(),
+  });
+  res.json({ success: true, message: 'Store reset to clean state', timestamp: new Date().toISOString() });
 });
 
 // ─── v1 API — Threat Intelligence ──────────────────────────────────────────

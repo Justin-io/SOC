@@ -1,20 +1,42 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# AEGIS-X — Autonomous Security Operations Console
 
-# Run and deploy your AI Studio app
+AEGIS-X is an autonomous AI-native Security Operations Center (SOC) platform designed for high-consequence cyber defense, real-time threat intelligence cascade, and Bayesian evidence fusion.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/19174c7b-2d52-4338-b1ab-4f7e7b57de5b
+- **Multi-Tier Intelligence Cascade**: Deterministic fast-path (Tier 0), Statistical anomaly detection (Tier 1), and Gemini Flash reasoning (Tier 2).
+- **10 Autonomous Specialist Agents**: Coordinator, Threat Intel, Malware, Cloud, Incident Response, Compliance, Edge, Deception, and Fusion Engine.
+- **Bayesian Evidence Fusion**: Log-odds fusion with Wilson confidence intervals and dissent scoring.
+- **Chronon & Digital Twin**: Lateral movement forecasting and zero-impact containment simulation.
+- **Real-Time Simulation**: Ingest and simulate live threat telemetry on demand.
+- **Immutable SHA-256 Audit Chain**: Cryptographic audit logging for full forensic transparency.
 
-## Run Locally
+## Quick Start
 
-**Prerequisites:**  Node.js
+### Prerequisites
+- Node.js (v18+)
 
+### Setup & Execution
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   ```bash
+   npm install
+   ```
+
+2. Copy environment file and configure your settings:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. (Optional) Set your `GEMINI_API_KEY` in `.env` to enable Gemini AI reasoning:
+   ```env
+   GEMINI_API_KEY="your-gemini-api-key"
+   PORT=3000
+   ```
+
+4. Start the application:
+   ```bash
+   npm run dev
+   ```
+
+5. Open [http://localhost:3000](http://localhost:3000) in your browser.
