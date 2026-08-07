@@ -121,64 +121,49 @@ export default function App() {
 
   const activeIncident = incidents.find((i) => i.id === selectedIncidentId) || incidents[0];
 
-  // Realtime Server SSE Bus Listener
+  // Realtime Server SSE Bus Subscriptions via apiClient
   useEffect(() => {
-    let eventSource: EventSource | null = null;
-    try {
-      eventSource = new EventSource('/api/events/stream');
+    const unsubHealth = apiClient.subscribeConnectionChange((connected) => {
+      setSystemHealth((prev) => ({ ...prev, realtimeConnected: connected }));
+    });
 
-      eventSource.addEventListener('telemetry', (e: MessageEvent) => {
-        try {
-          const data = JSON.parse(e.data);
-          setSystemHealth((prev) => ({
-            ...prev,
-            cpuUsage: data.cpuUsage || prev.cpuUsage,
-            memoryUsage: data.memoryUsage || prev.memoryUsage,
-            realtimeConnected: true,
-          }));
-        } catch {
-          // ignore parsing error
-        }
-      });
+    const unsubTelemetry = apiClient.subscribeTelemetry((data) => {
+      setSystemHealth((prev) => ({
+        ...prev,
+        cpuUsage: data.cpuUsage || prev.cpuUsage,
+        memoryUsage: data.memoryUsage || prev.memoryUsage,
+        realtimeConnected: true,
+      }));
+    });
 
-      eventSource.addEventListener('live_event', (e: MessageEvent) => {
-        try {
-          const data = JSON.parse(e.data);
-          setNotifications((prev) => [
-            {
-              id: data.id,
-              title: `Telemetry Alert: ${data.technique.name}`,
-              message: `Asset ${data.asset} registered ${data.technique.id} with ${data.confidence}% confidence.`,
-              timestamp: 'Just now',
-              severity: data.severity,
-              read: false,
-            },
-            ...prev.slice(0, 19),
-          ]);
-        } catch {
-          // ignore
-        }
-      });
+    const unsubLive = apiClient.subscribeLiveEvents((data) => {
+      setNotifications((prev) => [
+        {
+          id: data.id,
+          title: `Telemetry Alert: ${data.technique.name}`,
+          message: `Asset ${data.asset} registered ${data.technique.id} with ${data.confidence}% confidence.`,
+          timestamp: 'Just now',
+          severity: data.severity as any,
+          read: false,
+        },
+        ...prev.slice(0, 19),
+      ]);
+    });
 
-      eventSource.addEventListener('incident_update', (e: MessageEvent) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (data.incident) {
-            setIncidents((prev) => [data.incident, ...prev.filter((i) => i.id !== data.incident.id)]);
-            setSelectedIncidentId(data.incident.id);
-          } else if (data.type === 'STORE_RESET') {
-            setIncidents([]);
-          }
-        } catch {
-          // ignore
-        }
-      });
-    } catch {
-      // EventSource fallback
-    }
+    const unsubIncidents = apiClient.subscribeIncidentUpdates((data) => {
+      if (data.incident) {
+        setIncidents((prev) => [data.incident, ...prev.filter((i) => i.id !== data.incident.id)]);
+        setSelectedIncidentId(data.incident.id);
+      } else if (data.type === 'STORE_RESET') {
+        setIncidents([]);
+      }
+    });
 
     return () => {
-      if (eventSource) eventSource.close();
+      unsubHealth();
+      unsubTelemetry();
+      unsubLive();
+      unsubIncidents();
     };
   }, []);
 

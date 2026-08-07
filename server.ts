@@ -861,6 +861,16 @@ app.get('/api/v1/metrics', (_req: Request, res: Response) => {
   });
 });
 
+// ─── API 404 Handler ────────────────────────────────────────────────────────
+
+app.use('/api/*', (_req: Request, res: Response) => {
+  res.status(404).json({
+    success: false,
+    error: 'API endpoint not found',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // ─── Error Handler ──────────────────────────────────────────────────────────
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

@@ -37,16 +37,31 @@ class AEGISApiClient {
   private isConnected: boolean = true;
   private sseSource: EventSource | null = null;
   private onTelemetryCallbacks: Array<(data: Partial<SystemHealthMetrics>) => void> = [];
-  private onLiveEventCallbacks: Array<(data: { id: string; asset: string; severity: string; technique: { id: string; name: string }; timestamp: string }) => void> = [];
+  private onLiveEventCallbacks: Array<(data: { id: string; asset: string; severity: string; technique: { id: string; name: string }; timestamp: string; confidence?: number }) => void> = [];
+  private onIncidentUpdateCallbacks: Array<(data: any) => void> = [];
   private onConnectionChangeCallbacks: Array<(connected: boolean) => void> = [];
 
   constructor() {
     this.initSSE();
   }
 
+  private async safeJson<T>(res: Response): Promise<T | null> {
+    if (!res.ok) return null;
+    const contentType = res.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) return null;
+    try {
+      return (await res.json()) as T;
+    } catch {
+      return null;
+    }
+  }
+
   private initSSE() {
     if (typeof window === 'undefined') return;
     try {
+      if (this.sseSource) {
+        this.sseSource.close();
+      }
       this.sseSource = new EventSource('/api/events/stream');
 
       this.sseSource.onopen = () => {
@@ -72,6 +87,15 @@ class AEGISApiClient {
           this.onLiveEventCallbacks.forEach((cb) => cb(data));
         } catch (err) {
           console.error('Failed to parse SSE live_event:', err);
+        }
+      });
+
+      this.sseSource.addEventListener('incident_update', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          this.onIncidentUpdateCallbacks.forEach((cb) => cb(data));
+        } catch (err) {
+          console.error('Failed to parse SSE incident_update:', err);
         }
       });
 
@@ -105,18 +129,25 @@ class AEGISApiClient {
     };
   }
 
-  public subscribeLiveEvents(cb: (data: { id: string; asset: string; severity: string; technique: { id: string; name: string }; timestamp: string }) => void) {
+  public subscribeLiveEvents(cb: (data: { id: string; asset: string; severity: string; technique: { id: string; name: string }; timestamp: string; confidence?: number }) => void) {
     this.onLiveEventCallbacks.push(cb);
     return () => {
       this.onLiveEventCallbacks = this.onLiveEventCallbacks.filter((fn) => fn !== cb);
     };
   }
 
+  public subscribeIncidentUpdates(cb: (data: any) => void) {
+    this.onIncidentUpdateCallbacks.push(cb);
+    return () => {
+      this.onIncidentUpdateCallbacks = this.onIncidentUpdateCallbacks.filter((fn) => fn !== cb);
+    };
+  }
+
   public async fetchHealth(): Promise<SystemHealthMetrics> {
     try {
       const res = await fetch('/api/health');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await this.safeJson<any>(res);
+      if (data) {
         this.setConnected(true);
         return {
           ...INITIAL_SYSTEM_HEALTH,
@@ -143,9 +174,8 @@ class AEGISApiClient {
           rawEvidence: evidenceList.map((e) => `[${e.type}] ${e.source}: ${e.rawContent}`).join('\n'),
         }),
       });
-      if (res.ok) {
-        return await res.json();
-      }
+      const data = await this.safeJson<AIInvestigationResponse>(res);
+      if (data) return data;
     } catch (err) {
       console.warn('AI Investigation API call failed, falling back to local synthesis:', err);
     }
@@ -165,10 +195,8 @@ class AEGISApiClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, category, focusArea }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.report) return data.report;
-      }
+      const data = await this.safeJson<any>(res);
+      if (data && data.report) return data.report;
     } catch (err) {
       console.warn('Generate Report API call failed, falling back:', err);
     }
@@ -190,11 +218,9 @@ class AEGISApiClient {
   public async fetchIncidents(): Promise<Incident[]> {
     try {
       const res = await fetch('/api/v1/incidents');
-      if (res.ok) {
-        const json = await res.json();
-        if (json.data && Array.isArray(json.data.items)) {
-          return json.data.items;
-        }
+      const json = await this.safeJson<any>(res);
+      if (json && json.data && Array.isArray(json.data.items)) {
+        return json.data.items;
       }
     } catch (err) {
       console.warn('Fetch incidents API call failed, using synthetic baseline:', err);
@@ -210,11 +236,9 @@ class AEGISApiClient {
   }> {
     try {
       const res = await fetch('/api/v1/emulate', { method: 'POST' });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          return json.data;
-        }
+      const json = await this.safeJson<any>(res);
+      if (json && json.success && json.data) {
+        return json.data;
       }
     } catch (err) {
       console.warn('Trigger emulation API call failed:', err);
