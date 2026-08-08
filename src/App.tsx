@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { SimulationOverlay } from './components/ui/SimulationOverlay';
 import { Sidebar, ViewType } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { GlobalSearch } from './components/layout/GlobalSearch';
@@ -73,6 +74,8 @@ export default function App() {
 
   // Live Server AI & Emulation State
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
+  const [simulationOverlayVisible, setSimulationOverlayVisible] = useState<boolean>(false);
+  const [simulationResult, setSimulationResult] = useState<Incident | null>(null);
   const [isAIInvestigating, setIsAIInvestigating] = useState<boolean>(false);
   const [aiAnalysisOutput, setAiAnalysisOutput] = useState<string>('');
   const [isGeneratingReport, setIsGeneratingReport] = useState<boolean>(false);
@@ -98,30 +101,41 @@ export default function App() {
   }, [selectedIncidentId]);
 
   const handleEmulateThreat = async () => {
+    if (isSimulating) return;
     setIsSimulating(true);
+    setSimulationResult(null);
+    setSimulationOverlayVisible(true);
     try {
       const res = await apiClient.triggerEmulation();
       if (res.success && res.incident) {
         const newInc = res.incident;
         setIncidents((prev) => [newInc, ...prev.filter((i) => i.id !== newInc.id)]);
         setSelectedIncidentId(newInc.id);
+        setSimulationResult(newInc);
         setNotifications((prev) => [
           {
             id: `NOTIF-${Date.now()}`,
-            title: `Live Threat Ingested: ${newInc.title}`,
-            message: `Asset ${newInc.asset.hostname} (${newInc.asset.ip}) under active investigation by 10 autonomous agents.`,
+            title: `⚡ AI Threat Ingested: ${newInc.title}`,
+            message: `Asset ${newInc.asset.hostname} (${newInc.asset.ip}) under active investigation by 10 autonomous agents. Source: ${newInc.source}.`,
             timestamp: 'Just now',
             severity: newInc.severity,
             read: false,
           },
           ...prev,
         ]);
+        if (res.evidence) setActiveEvidence(res.evidence);
+        if (res.decision) setActiveDecision(res.decision);
       }
     } catch (err) {
       console.error('Emulation error:', err);
     } finally {
       setIsSimulating(false);
     }
+  };
+
+  const handleSimulationDismiss = () => {
+    setSimulationOverlayVisible(false);
+    setActiveView('incident-room');
   };
 
   const handleResetStore = async () => {
@@ -497,6 +511,13 @@ export default function App() {
             prev.map((n) => (n.id === id ? { ...n, read: true } : n))
           );
         }}
+      />
+
+      {/* AI Multi-Agent Simulation Cascade Overlay */}
+      <SimulationOverlay
+        visible={simulationOverlayVisible}
+        result={simulationResult}
+        onDismiss={handleSimulationDismiss}
       />
     </div>
   );

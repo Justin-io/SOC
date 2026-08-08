@@ -376,24 +376,219 @@ app.post(['/api/v1/emulate', '/api/emulate'], async (_req: Request, res: Respons
     const ai = getAI();
     const id = `INC-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
 
-    let title = 'Kerberoasting & LSASS Memory Extraction on Domain Controller';
-    let description = 'Suspicious memory dump process executed against lsass.exe followed by Kerberos ticket request TGS-REQ with RC4 encryption.';
-    let mitreId = 'T1003.001';
-    let mitreName = 'OS Credential Dumping: LSASS Memory';
-    let mitreTactic = 'Credential Access';
-    let severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' = 'CRITICAL';
-    let hostname = 'DC01-PROD-EAST';
-    let ip = '10.142.4.10';
+    // ─── Curated Attack Scenario Bank (used as base + AI enrichment) ─────────
+    const ATTACK_SCENARIOS = [
+      {
+        title: 'Kerberoasting & LSASS Memory Extraction on Domain Controller',
+        description: 'Suspicious memory dump process executed against lsass.exe followed by Kerberos ticket request TGS-REQ with RC4 encryption downgrade. Mimikatz signatures detected in process memory.',
+        mitreId: 'T1003.001', mitreName: 'OS Credential Dumping: LSASS Memory', mitreTactic: 'Credential Access',
+        severity: 'CRITICAL' as const, hostname: 'DC01-PROD-EAST', ip: '10.142.4.10',
+        assetType: 'Domain Controller', predictedNextTarget: 'BACKUP-DC02-WEST',
+        sourceDetector: 'CrowdStrike EDR + Active Directory Audit', likelihoodRatio: 22.4,
+        containmentImpact: 'Isolating DC01 will trigger FSMO role failover; 4-minute kerberos authentication outage expected.',
+        businessImpact: 'Full administrative credential compromise grants attacker god-mode over 847 domain-joined endpoints.',
+        recommendedAction: 'Immediately isolate DC01-PROD-EAST, rotate all service account passwords, revoke all Kerberos tickets (krbtgt rotation x2).',
+        counterfactualExplanation: 'Without lsass.exe memory access telemetry, confidence drops from 96% to 31% — below actionable threshold.',
+      },
+      {
+        title: 'APT Lateral Movement via SMB Pass-the-Hash — Finance Subnet',
+        description: 'NTLM hash relay attack originating from JUMP-HOST-02, propagating to FINANCE-SRV-01 via SMB. 312 authentication failures in 90 seconds consistent with automated credential spraying. Hash capture via Responder tool signature.',
+        mitreId: 'T1550.002', mitreName: 'Use Alternate Authentication Material: Pass the Hash', mitreTactic: 'Lateral Movement',
+        severity: 'CRITICAL' as const, hostname: 'JUMP-HOST-02', ip: '10.17.8.45',
+        assetType: 'Jump Host', predictedNextTarget: 'FINANCE-DB-01',
+        sourceDetector: 'SIEM Correlation Rule + NIDS Snort', likelihoodRatio: 18.7,
+        containmentImpact: 'Blocking JUMP-HOST-02 will disrupt 12 active admin sessions; 8 pending maintenance tasks will abort.',
+        businessImpact: 'Lateral movement to FINANCE-DB-01 risks exfiltration of 14M customer financial records (PCI-DSS breach).',
+        recommendedAction: 'Block SMB traffic from JUMP-HOST-02, rotate NTLM hashes, enforce NTLMv2 policy, enable Protected Users group.',
+        counterfactualExplanation: 'Removing the SMB authentication log correlation drops confidence to 28%; network flow anomaly alone is insufficient.',
+      },
+      {
+        title: 'Zero-Day Exploit: Remote Code Execution on Internet-Facing API Gateway',
+        description: 'Unauthenticated RCE vulnerability (CVE-2024-38122) exploited against API-GW-PROD. Attacker achieved reverse shell via curl to 91.234.55.18 (attributed: Lazarus Group C2). Post-exploit activity: privilege escalation via SUID binary.',
+        mitreId: 'T1190', mitreName: 'Exploit Public-Facing Application', mitreTactic: 'Initial Access',
+        severity: 'CRITICAL' as const, hostname: 'API-GW-PROD-01', ip: '172.16.1.5',
+        assetType: 'Web Server', predictedNextTarget: 'INTERNAL-AUTH-SRV',
+        sourceDetector: 'Deception Honeypot + WAF Anomaly Detection', likelihoodRatio: 29.1,
+        containmentImpact: 'Isolating API-GW-PROD-01 will take the payment processing API offline, impacting 23K active transactions/min.',
+        businessImpact: 'RCE on perimeter gateway provides attacker direct pivot to internal network; estimated breach scope: entire prod environment.',
+        recommendedAction: 'Apply emergency patch CVE-2024-38122, rotate API certificates, block C2 range 91.234.55.0/24, enable WAF strict mode.',
+        counterfactualExplanation: 'Without honeytoken access log (HONEY-API-KEY-PROD), this would be classified as routine error traffic.',
+      },
+      {
+        title: 'Ransomware Pre-Staging: Mass File Enumeration & Shadow Copy Deletion',
+        description: 'Suspicious mass file enumeration across 847 SMB shares (3.2M files scanned in 4 minutes). vssadmin.exe invoked to delete VSS shadow copies. Pattern matches LockBit 3.0 pre-encryption reconnaissance phase.',
+        mitreId: 'T1490', mitreName: 'Inhibit System Recovery', mitreTactic: 'Impact',
+        severity: 'CRITICAL' as const, hostname: 'FILE-SRV-PROD-03', ip: '10.22.14.8',
+        assetType: 'Server', predictedNextTarget: 'BACKUP-NAS-01',
+        sourceDetector: 'CrowdStrike EDR + File Integrity Monitor', likelihoodRatio: 31.4,
+        containmentImpact: 'Isolating FILE-SRV-PROD-03 halts 23 active file sharing workflows; payroll system will be impacted.',
+        businessImpact: 'LockBit pre-staging with shadow copy deletion indicates 6-8 hour window before mass encryption; estimated $4.2M ransom demand.',
+        recommendedAction: 'IMMEDIATE: Network segment isolation, suspend all non-essential SMB, force EDR deep scan on all endpoints, notify IR team.',
+        counterfactualExplanation: 'Shadow copy deletion telemetry is the critical indicator; removing it drops this to routine scan activity (22% confidence).',
+      },
+      {
+        title: 'Cloud Misconfiguration: S3 Bucket Public Exposure & Data Exfiltration',
+        description: 'S3 bucket "prod-customer-data-backup" found publicly accessible after misconfigured ACL push. 4.7GB of PII data downloaded by 3 external IPs (including Shodan crawler). Customer SSNs, payment card data exposed for 47 minutes.',
+        mitreId: 'T1530', mitreName: 'Data from Cloud Storage', mitreTactic: 'Exfiltration',
+        severity: 'CRITICAL' as const, hostname: 'AWS-PROD-WORKER-07', ip: '172.31.4.22',
+        assetType: 'Cloud Instance', predictedNextTarget: 'RDS-PROD-PAYMENTS',
+        sourceDetector: 'Cloud Security Posture (AWS GuardDuty + Macie)', likelihoodRatio: 24.8,
+        containmentImpact: 'Revoking S3 public access will not restore already-exfiltrated data; audit trail for forensics will be preserved.',
+        businessImpact: 'GDPR/CCPA breach notification required within 72 hours; potential $18M regulatory fine; estimated 340K affected customers.',
+        recommendedAction: 'Immediately revoke S3 public ACL, rotate all AWS credentials, enable bucket versioning + MFA delete, notify legal/compliance.',
+        counterfactualExplanation: 'Without Macie PII classification telemetry, exposure duration estimate changes from 47 min to unknown.',
+      },
+      {
+        title: 'Insider Threat: Privileged User Exfiltrating IP to Personal Cloud',
+        description: 'User jsmith@corp.com (Finance Director) uploaded 2.1GB of proprietary financial models to personal Dropbox account using corporate laptop FIN-LAPTOP-042. DLP rule triggered on keyword "acquisition_target_CONFIDENTIAL". Access occurred at 02:14 AM local time — anomalous for this user profile.',
+        mitreId: 'T1567.002', mitreName: 'Exfiltration Over Web Service: Exfiltration to Cloud Storage', mitreTactic: 'Exfiltration',
+        severity: 'HIGH' as const, hostname: 'FIN-LAPTOP-042', ip: '10.88.12.104',
+        assetType: 'Endpoint', predictedNextTarget: 'SHAREPOINT-FINANCE-PROD',
+        sourceDetector: 'Symantec DLP + UEBA Behavioral Analytics', likelihoodRatio: 16.3,
+        containmentImpact: 'Revoking jsmith access credentials will temporarily disable 3 critical financial reporting pipelines.',
+        businessImpact: 'Proprietary M&A target data exposure could compromise $840M acquisition deal and trigger SEC disclosure obligations.',
+        recommendedAction: 'Revoke jsmith credentials, forensic image FIN-LAPTOP-042, issue legal hold, escalate to legal counsel for potential insider threat investigation.',
+        counterfactualExplanation: 'Without UEBA baseline deviation (247% above normal upload behavior), DLP alert alone yields only 41% confidence.',
+      },
+      {
+        title: 'DNS Tunneling C2 Channel: Cobalt Strike Beacon Exfiltrating Data',
+        description: 'Cobalt Strike beacon detected on WEB-APP-SRV-08 using DNS TXT record queries to c2.evil-domain.ru for command-and-control. 847 DNS queries/minute — 1,200% above baseline. Payload encoded in base64 DNS TXT responses. Beacon interval: 60s with ±15s jitter.',
+        mitreId: 'T1071.004', mitreName: 'Application Layer Protocol: DNS', mitreTactic: 'Command and Control',
+        severity: 'HIGH' as const, hostname: 'WEB-APP-SRV-08', ip: '10.44.2.17',
+        assetType: 'Web Server', predictedNextTarget: 'INTERNAL-LDAP-SRV',
+        sourceDetector: 'NIDS Snort + DNS Anomaly Detector', likelihoodRatio: 19.2,
+        containmentImpact: 'Blocking external DNS resolution for WEB-APP-SRV-08 will disrupt CDN health checks and SSL certificate renewal.',
+        businessImpact: 'Active C2 channel indicates attacker has persistent foothold; dwell time estimated 14-21 days based on beacon artifact timestamps.',
+        recommendedAction: 'Block DNS queries to c2.evil-domain.ru, isolate WEB-APP-SRV-08 for forensics, scan all endpoints for Cobalt Strike artifacts.',
+        counterfactualExplanation: 'Without DNS query volume anomaly detection, C2 traffic blends with legitimate API calls — confidence drops to 19%.',
+      },
+      {
+        title: 'BEC Attack: Executive Email Compromise & Fraudulent Wire Transfer',
+        description: 'CFO email account (cwalters@corp.com) compromised via adversary-in-the-middle OAuth token theft. Attacker created inbox rule to forward all emails containing "wire", "transfer", "payment". Fraudulent $2.3M wire transfer request sent to Finance team impersonating CFO.',
+        mitreId: 'T1534', mitreName: 'Internal Spearphishing', mitreTactic: 'Lateral Movement',
+        severity: 'HIGH' as const, hostname: 'EXCHANGE-PROD-02', ip: '10.11.0.8',
+        assetType: 'Server', predictedNextTarget: 'FINANCE-WORKSTATION-12',
+        sourceDetector: 'Microsoft Defender for O365 + CASB', likelihoodRatio: 14.9,
+        containmentImpact: 'Revoking OAuth tokens will immediately disable CFO email access; emergency communication via phone required.',
+        businessImpact: 'If wire transfer processes, $2.3M loss is likely unrecoverable; CEO/board notification required immediately.',
+        recommendedAction: 'Revoke all OAuth tokens for cwalters@corp.com, halt wire transfer, notify bank for recall, enable CAE (continuous access evaluation).',
+        counterfactualExplanation: 'Without OAuth token anomaly (login from Tor IP 185.220.101.5), this appears as legitimate executive email workflow.',
+      },
+      {
+        title: 'Cryptominer Deployment via Kubernetes Privilege Escalation',
+        description: 'Attacker exploited misconfigured RBAC in K8s cluster (CVE-2024-7646) to gain cluster-admin. 47 cryptomining pods (XMRig) deployed across 6 nodes consuming 94% GPU/CPU resources. Monero wallet: 44AFFq5kSi. Network egress to pool.minexmr.com:3333.',
+        mitreId: 'T1610', mitreName: 'Deploy Container', mitreTactic: 'Execution',
+        severity: 'HIGH' as const, hostname: 'K8S-MASTER-PROD-01', ip: '10.100.0.10',
+        assetType: 'Cloud Instance', predictedNextTarget: 'K8S-NODE-04',
+        sourceDetector: 'Falco Runtime Security + Cloud Security Posture', likelihoodRatio: 11.8,
+        containmentImpact: 'Draining compromised K8s nodes will trigger pod rescheduling; 14 production microservices will have 2-4 minute interruption.',
+        businessImpact: 'Cluster-admin access means attacker can access secrets in all K8s namespaces including database credentials and API keys.',
+        recommendedAction: 'kubectl delete all mining pods, rotate all K8s secrets, apply RBAC least-privilege, enable PodSecurity standards.',
+        counterfactualExplanation: 'Without Falco syscall monitoring, GPU utilization spike alone could be attributed to legitimate ML workloads.',
+      },
+      {
+        title: 'MFA Fatigue Attack: Identity Provider Bypass Leading to Admin Access',
+        description: 'Attacker sent 187 MFA push notifications to user mchen@corp.com over 40 minutes (MFA fatigue/push bombing). User approved at attempt #142 at 01:47 AM. Subsequent login from 185.220.101.45 (Tor) obtained Global Admin role in Azure AD. 3 new admin accounts created.',
+        mitreId: 'T1621', mitreName: 'Multi-Factor Authentication Request Generation', mitreTactic: 'Credential Access',
+        severity: 'CRITICAL' as const, hostname: 'AZURE-AD-TENANT', ip: '185.220.101.45',
+        assetType: 'Cloud Instance', predictedNextTarget: 'AZURE-KEY-VAULT-PROD',
+        sourceDetector: 'Microsoft Entra ID + SIEM Correlation Rule', likelihoodRatio: 27.3,
+        containmentImpact: 'Revoking Global Admin session will lock out attacker but also disrupt mchen pending admin operations.',
+        businessImpact: 'Global Admin access to Azure AD means attacker controls all M365, Azure subscriptions, and can exfiltrate entire tenant data.',
+        recommendedAction: 'Immediately revoke mchen session tokens, disable 3 rogue admin accounts, enable number matching MFA, review all recent admin actions.',
+        counterfactualExplanation: 'Without MFA push count anomaly (187 requests vs. 1.2 average), this appears as standard login from new location.',
+      },
+      {
+        title: 'Supply Chain Compromise: Malicious NPM Package in CI/CD Pipeline',
+        description: 'Trojanized npm package "lodash-secure@4.17.22" (typosquatting) injected into production CI/CD pipeline build. Package contains obfuscated backdoor exfiltrating environment variables (including AWS_SECRET_ACCESS_KEY) to 45.76.223.14. 23 production builds affected.',
+        mitreId: 'T1195.002', mitreName: 'Compromise Software Supply Chain', mitreTactic: 'Initial Access',
+        severity: 'CRITICAL' as const, hostname: 'CICD-RUNNER-03', ip: '10.77.5.12',
+        assetType: 'Server', predictedNextTarget: 'PROD-SECRETS-VAULT',
+        sourceDetector: 'Snyk + SIEM Dependency Audit', likelihoodRatio: 25.6,
+        containmentImpact: 'Halting CI/CD pipeline stops all deployments; 7 pending hotfixes will be blocked including a critical security patch.',
+        businessImpact: 'Exfiltrated AWS keys provide full access to production cloud environment; 23 builds potentially deployed backdoored artifacts to prod.',
+        recommendedAction: 'Immediately rotate all secrets exposed in environment variables, remove malicious package, rebuild all 23 affected artifacts, scan prod deployments.',
+        counterfactualExplanation: 'Without build artifact hash comparison, malicious package appears as legitimate dependency update.',
+      },
+      {
+        title: 'VPN Gateway Zero-Day: Pre-Auth RCE Enabling Network Pivot',
+        description: 'Critical pre-authentication RCE vulnerability (CVE-2024-21887) in Ivanti Connect Secure VPN gateway actively exploited. Webshell "tunnel.jsp" dropped in /dana-na/ directory. Reverse tunnel established to 104.21.45.67:8443. 1,247 user sessions potentially compromised.',
+        mitreId: 'T1133', mitreName: 'External Remote Services', mitreTactic: 'Persistence',
+        severity: 'CRITICAL' as const, hostname: 'VPN-GW-EDGE-01', ip: '172.16.0.1',
+        assetType: 'Web Server', predictedNextTarget: 'CORE-SWITCH-INFRA-01',
+        sourceDetector: 'NIDS Snort + Deception Honeypot', likelihoodRatio: 30.7,
+        containmentImpact: 'Taking VPN gateway offline will disconnect 847 remote workers and all site-to-site VPN tunnels immediately.',
+        businessImpact: 'VPN compromise gives attacker access to internal network without going through perimeter; all internal systems considered exposed.',
+        recommendedAction: 'EMERGENCY: Take VPN offline, apply Ivanti patch, forensic analysis of all sessions since T-72h, assume breach protocol for internal network.',
+        counterfactualExplanation: 'Webshell detection is definitive; without endpoint telemetry, log-only analysis gives 38% confidence (attribution unclear).',
+      },
+    ];
+
+    const scenario = ATTACK_SCENARIOS[Math.floor(Math.random() * ATTACK_SCENARIOS.length)];
+
+    let title = scenario.title;
+    let description = scenario.description;
+    let mitreId = scenario.mitreId;
+    let mitreName = scenario.mitreName;
+    let mitreTactic = scenario.mitreTactic;
+    let severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' = scenario.severity;
+    let hostname = scenario.hostname;
+    let ip = scenario.ip;
+
+    // Additional AI-generated fields with fallbacks (AI can override these with richer context)
+    let assetType = scenario.assetType;
+    let containmentImpact = scenario.containmentImpact;
+    let businessImpact = scenario.businessImpact;
+    let recommendedAction = scenario.recommendedAction;
+    let counterfactualExplanation = scenario.counterfactualExplanation;
+    let predictedNextTarget = scenario.predictedNextTarget;
+    let sourceDetector = scenario.sourceDetector;
+    let likelihoodRatio = scenario.likelihoodRatio;
 
     if (ai) {
       try {
+        const attackScenarios = [
+          'ransomware deployment via supply chain compromise',
+          'APT lateral movement using stolen Kerberos tickets',
+          'cloud misconfiguration exploitation leading to data exfiltration',
+          'zero-day exploit targeting enterprise VPN gateway',
+          'insider threat exfiltrating IP via encrypted channel',
+          'BEC attack compromising executive email and financial systems',
+          'cryptominer deployment on containerized workloads',
+          'DNS tunneling for covert C2 communication',
+          'privilege escalation via unpatched kernel vulnerability',
+          'identity-based attack using MFA fatigue technique',
+        ];
+        const chosenScenario = attackScenarios[Math.floor(Math.random() * attackScenarios.length)];
+
         const response = await ai.models.generateContent({
           model: 'gemini-2.0-flash',
-          contents: `Generate a realistic enterprise cyber security incident for AEGIS-X SOC. Respond in JSON only:
-{"title":"string","description":"string","severity":"CRITICAL|HIGH|MEDIUM","hostname":"string","ip":"string","mitreId":"string","mitreName":"string","mitreTactic":"string"}`,
-          config: { temperature: 0.7, maxOutputTokens: 250 },
+          contents: `You are AEGIS-X, an elite AI SOC system. Generate a hyper-realistic enterprise cybersecurity incident for the following attack scenario: "${chosenScenario}".
+
+Respond ONLY with a single valid JSON object. No markdown, no code blocks, no extra text. Use this exact schema:
+{
+  "title": "concise technical incident title (max 80 chars)",
+  "description": "2-3 sentence technical description of what happened, including specific indicators of compromise",
+  "severity": "CRITICAL",
+  "hostname": "realistic enterprise hostname (e.g. DC01-PROD-EAST, WEB-SRV-443, JUMP-HOST-02)",
+  "ip": "realistic internal IP (10.x.x.x or 172.16.x.x)",
+  "mitreId": "valid MITRE ATT&CK technique ID (e.g. T1078.002)",
+  "mitreName": "full MITRE technique name",
+  "mitreTactic": "MITRE tactic category (e.g. Credential Access, Lateral Movement)",
+  "assetType": "asset type (Domain Controller|Web Server|Database|Endpoint|Cloud Instance|Jump Host|Backup Server)",
+  "containmentImpact": "one sentence describing the operational impact of isolating this asset",
+  "businessImpact": "one sentence describing the business risk if not contained",
+  "recommendedAction": "specific technical remediation steps (one sentence)",
+  "counterfactualExplanation": "what evidence, if removed, would drop confidence below threshold",
+  "predictedNextTarget": "hostname of the next likely lateral movement target",
+  "sourceDetector": "detection source system (e.g. CrowdStrike EDR|SIEM Correlation Rule|Deception Honeypot|Cloud Security Posture|NIDS Snort)",
+  "likelihoodRatio": "numeric likelihood ratio between 8.0 and 32.0"
+}`,
+          config: { temperature: 0.85, maxOutputTokens: 600 },
         });
-        const match = response.text?.match(/\{[\s\S]*\}/);
+
+        const rawText = response.text || '';
+        const match = rawText.match(/\{[\s\S]*\}/);
         if (match) {
           const parsed = JSON.parse(match[0]);
           title = parsed.title || title;
@@ -419,11 +614,11 @@ app.post(['/api/v1/emulate', '/api/emulate'], async (_req: Request, res: Respons
         id: `AST-${Math.floor(Math.random() * 900 + 100)}`,
         hostname,
         ip,
-        type: hostname.includes('DC') ? 'Domain Controller' : hostname.includes('aws') ? 'Cloud Instance' : 'Server',
+        type: assetType,
         criticality: severity === 'CRITICAL' ? 'CRITICAL' : 'HIGH',
         owner: 'Security Operations',
       },
-      source: ai ? 'Gemini AI Telemetry Engine' : 'CrowdStrike EDR + Active Directory Audit',
+      source: sourceDetector,
       mitreTechnique: { id: mitreId, name: mitreName, tactic: mitreTactic },
       confidence: Math.floor(Math.random() * 10 + 88),
       riskScore: Math.floor(Math.random() * 12 + 85),
@@ -432,54 +627,63 @@ app.post(['/api/v1/emulate', '/api/emulate'], async (_req: Request, res: Respons
       description,
       assignedAgent: 'COORDINATOR',
       affectedSystemsCount: Math.floor(Math.random() * 10 + 3),
-      containmentImpact: `Isolating ${hostname} will trigger automated rollover. Expected minimal service disruption.`,
-      businessImpact: `High risk of administrative compromise across domain systems.`,
-      recommendedAction: `Isolate host ${hostname} immediately, revoke session tokens, force credential rotation.`,
-      counterfactualExplanation: `Without process memory dump evidence, threat confidence drops significantly.`,
-      likelihoodRatio: 16.8,
+      containmentImpact,
+      businessImpact,
+      recommendedAction,
+      counterfactualExplanation,
+      likelihoodRatio,
+      predictedNextTarget,
     };
 
     store.incidents.unshift(incident);
 
+    // Build contextual evidence based on MITRE tactic
+    const evidenceTypeMap: Record<string, { type: string; source: string; toolUsed: string; agent: string; content: string }[]> = {
+      'Credential Access': [
+        { type: 'MEMORY', source: 'EDR Memory Guard', toolUsed: 'CrowdStrike Falcon', agent: 'MALWARE', content: `LSASS memory access detected on ${hostname} (${ip}). Process mimikatz.exe with high-entropy entropy injection. Signature: SIGMA-CRED-DUMP-001.` },
+        { type: 'AUTH', source: 'Active Directory Audit', toolUsed: 'Microsoft Sentinel', agent: 'THREAT_INTEL', content: `Anomalous Kerberos TGS-REQ with RC4 cipher downgrade from ${ip}. 47 ticket requests in 120s. Consistent with Kerberoasting pattern.` },
+      ],
+      'Lateral Movement': [
+        { type: 'NETWORK', source: 'Network Sensor', toolUsed: 'NIDS Snort', agent: 'CLOUD', content: `SMB lateral movement from ${ip} → ${predictedNextTarget}. Pass-the-Hash attempt detected. Authentication failure spike: 312 events/min.` },
+        { type: 'LOG', source: 'EDR Telemetry', toolUsed: 'CrowdStrike Falcon', agent: 'MALWARE', content: `PsExec remote execution from ${hostname}. Command: net use \\\\${predictedNextTarget}\\C$. Elevated token abuse confirmed.` },
+      ],
+      'Exfiltration': [
+        { type: 'NETWORK', source: 'DLP Gateway', toolUsed: 'Symantec DLP', agent: 'CLOUD', content: `4.7GB egress to 185.220.101.45:443 (Tor exit node). Encrypted payload. Baseline deviation: +1,240%. Exfiltration pattern confirmed.` },
+        { type: 'FILE', source: 'File Integrity Monitor', toolUsed: 'Tripwire', agent: 'THREAT_INTEL', content: `Bulk archive operation on ${hostname}: 847 files zipped to /tmp/.hidden/payload.7z. Archive password-protected. Timestamp anomaly detected.` },
+      ],
+    };
+
+    const evidenceSets = evidenceTypeMap[mitreTactic] || [
+      { type: 'NETWORK', source: 'SIEM Correlation', toolUsed: 'Splunk SIEM', agent: 'THREAT_INTEL', content: `${mitreName} (${mitreId}) pattern detected on ${hostname} (${ip}). Correlation rule SIGMA-${mitreId.replace('.','')}-GENERIC triggered.` },
+      { type: 'AUTH', source: 'Identity Provider', toolUsed: 'Okta Audit', agent: 'CLOUD', content: `Suspicious authentication event from ${ip}. Geo-velocity violation: login from 3 countries within 40 minutes. MFA bypass attempted.` },
+    ];
+
     const newEvidence: EvidenceItem[] = [
-      {
-        id: `EVD-${Date.now()}-1`,
+      ...evidenceSets.map((e, i) => ({
+        id: `EVD-${Date.now()}-${i + 1}`,
         incidentId: id,
         timestamp: new Date().toISOString(),
-        type: 'MEMORY',
-        source: 'EDR Agent',
-        rawContent: `Process memory dump detected targeting memory space of ${hostname} (${ip}). Signature match: SIGMA-MEMORY-DUMP.`,
-        weight: 10,
-        confidence: incident.confidence,
+        type: e.type as EvidenceItem['type'],
+        source: e.source,
+        rawContent: e.content,
+        weight: 10 - i,
+        confidence: incident.confidence - i * 2,
         mitreId,
-        toolUsed: 'EDR Memory Guard',
-        flaggedByAgent: 'MALWARE',
-      },
-      {
-        id: `EVD-${Date.now()}-2`,
-        incidentId: id,
-        timestamp: new Date().toISOString(),
-        type: 'AUTH',
-        source: 'Identity Provider',
-        rawContent: `Anomalous authentication request originating from ${ip}. Cipher downgrade to RC4 detected.`,
-        weight: 9,
-        confidence: incident.confidence - 2,
-        mitreId,
-        toolUsed: 'Identity Audit',
-        flaggedByAgent: 'THREAT_INTEL',
-      },
+        toolUsed: e.toolUsed,
+        flaggedByAgent: e.agent as EvidenceItem['flaggedByAgent'],
+      })),
       {
         id: `EVD-${Date.now()}-3`,
         incidentId: id,
         timestamp: new Date().toISOString(),
-        type: 'NETWORK',
-        source: 'Perimeter Gateway',
-        rawContent: `Outbound beacon to external IP 185.220.101.45 (Tor Exit Node) detected from ${hostname}.`,
-        weight: 8,
-        confidence: incident.confidence - 4,
-        mitreId: 'T1071',
-        toolUsed: 'NGFW Sentinel',
-        flaggedByAgent: 'CLOUD',
+        type: 'NETWORK' as EvidenceItem['type'],
+        source: 'Deception Engine',
+        rawContent: `HONEY-VAULT-DB honeytoken accessed from ${ip}. Canary credential used: svc_backup_ro. AEGIS-X Deception Mesh alert triggered. Zero legitimate access expected.`,
+        weight: 10,
+        confidence: 99,
+        mitreId: 'T1078',
+        toolUsed: 'AEGIS-X Deception Mesh',
+        flaggedByAgent: 'THREAT_INTEL' as EvidenceItem['flaggedByAgent'],
       },
     ];
 
