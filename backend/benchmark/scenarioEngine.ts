@@ -1,167 +1,173 @@
-/**
- * AEGIS-X Backend — Benchmark / Scenario Replay Engine
- * Replays synthetic security scenarios through the full pipeline.
- * Measures: latency, precision, recall, MTTC, agent performance.
- */
+/** Deterministic 200-incident scenario harness with labelled ground truth. */
 
+import { performance } from 'perf_hooks';
 import { randomUUID } from 'crypto';
 import type { BenchmarkResult } from '../core/types.js';
 import { normalizeAlert } from '../ingestion/normalizer.js';
-import { startInvestigation } from '../orchestration/workflowEngine.js';
+import { startInvestigation, waitForInvestigation } from '../orchestration/workflowEngine.js';
+import { runTier0 } from '../intelligence/tier0.js';
+import { runTier1 } from '../intelligence/tier1.js';
+import { runTier2 } from '../intelligence/tier2.js';
+import { agentRegistry } from '../agents/registry.js';
 import { getLogger } from '../core/logger.js';
 
 const log = getLogger('benchmark:engine');
 
-interface Scenario {
+export interface ScenarioIncident {
   id: string;
-  name: string;
+  title: string;
   description: string;
-  alertCount: number;
-  expectedTruePositives: number;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+  hostname: string;
+  ip: string;
+  mitreId: string;
+  mitreName: string;
+  mitreTactic: string;
+  confidence: number;
+  groundTruth: { label: 'benign' | 'malicious'; trueTechnique: string };
 }
 
-const SYNTHETIC_SCENARIOS: Scenario[] = [
-  {
-    id: 'SCN-001',
-    name: 'Kerberoasting Mass Campaign',
-    description: 'High-volume Active Directory credential harvesting via Kerberos ticket abuse.',
-    alertCount: 20,
-    expectedTruePositives: 18,
-  },
-  {
-    id: 'SCN-002',
-    name: 'Cloud Exfiltration Chain',
-    description: 'Multi-stage AWS IAM abuse + S3 data exfiltration to TOR network.',
-    alertCount: 15,
-    expectedTruePositives: 14,
-  },
-  {
-    id: 'SCN-003',
-    name: 'Kubernetes Lateral Movement',
-    description: 'Container escape + cluster-wide privilege escalation attempt.',
-    alertCount: 10,
-    expectedTruePositives: 9,
-  },
-];
+const BENIGN_VARIANTS = [
+  { name: 'backup jobs', technique: 'T1078', tactic: 'Persistence' },
+  { name: 'patch bursts', technique: 'T1059.001', tactic: 'Execution' },
+  { name: 'admin maintenance', technique: 'T1021.002', tactic: 'Lateral Movement' },
+  { name: 'port scans that resolve benign', technique: 'T1048', tactic: 'Exfiltration' },
+] as const;
+const ATTACK_FAMILIES = [
+  { name: 'Spearphishing to command execution', technique: 'T1566', tactic: 'Initial Access' },
+  { name: 'Valid accounts lateral movement', technique: 'T1078', tactic: 'Defense Evasion' },
+  { name: 'PowerShell staging chain', technique: 'T1059.001', tactic: 'Execution' },
+  { name: 'DNS command and control chain', technique: 'T1071.004', tactic: 'Command and Control' },
+  { name: 'SMB administration chain', technique: 'T1021.002', tactic: 'Lateral Movement' },
+  { name: 'Exfiltration over alternative protocol', technique: 'T1048', tactic: 'Exfiltration' },
+] as const;
 
-const RUNNING_BENCHMARKS = new Map<string, { status: string; startedAt: string }>();
-const COMPLETED_BENCHMARKS = new Map<string, BenchmarkResult>();
-
-export async function startBenchmark(scenarioId?: string): Promise<string> {
-  const scenario = SYNTHETIC_SCENARIOS.find((s) => s.id === scenarioId) ?? SYNTHETIC_SCENARIOS[0];
-  const benchmarkId = randomUUID();
-
-  RUNNING_BENCHMARKS.set(benchmarkId, {
-    status: 'RUNNING',
-    startedAt: new Date().toISOString(),
+/** 120 benign incidents and 80 multi-stage attack incidents across six families. */
+export function generateScenarioIncidents(): ScenarioIncident[] {
+  const benign = Array.from({ length: 120 }, (_, index) => {
+    const variant = BENIGN_VARIANTS[index % BENIGN_VARIANTS.length];
+    return {
+      id: `BENIGN-${String(index + 1).padStart(3, '0')}`,
+      title: `Resolved benign ${variant.name} variant ${index + 1}`,
+      description: `Approved ${variant.name}; telemetry was reconciled with a change record and resolved benign.`,
+      severity: index % 5 === 0 ? 'MEDIUM' as const : 'LOW' as const,
+      hostname: `BENIGN-HOST-${index % 24}`,
+      ip: `10.20.${Math.floor(index / 24)}.${(index % 24) + 10}`,
+      mitreId: variant.technique,
+      mitreName: variant.name,
+      mitreTactic: variant.tactic,
+      confidence: 18 + (index % 17),
+      groundTruth: { label: 'benign' as const, trueTechnique: variant.technique },
+    };
   });
-
-  log.info('Benchmark started', { meta: { benchmarkId, scenario: scenario.name } });
-
-  // Run asynchronously
-  runBenchmark(benchmarkId, scenario).catch((err) => {
-    log.error('Benchmark failed', err);
-    RUNNING_BENCHMARKS.delete(benchmarkId);
+  const malicious = Array.from({ length: 80 }, (_, index) => {
+    const family = ATTACK_FAMILIES[index % ATTACK_FAMILIES.length];
+    return {
+      id: `ATTACK-${String(index + 1).padStart(3, '0')}`,
+      title: `${family.name} multi-stage attack ${index + 1}`,
+      description: `Multi-stage attack chain: initial foothold, credential access, ${family.name.toLowerCase()}, and attempted data collection.`,
+      severity: index % 4 === 0 ? 'CRITICAL' as const : 'HIGH' as const,
+      hostname: `ATTACK-HOST-${index % 20}`,
+      ip: `172.20.${Math.floor(index / 20)}.${(index % 20) + 10}`,
+      mitreId: family.technique,
+      mitreName: family.name,
+      mitreTactic: family.tactic,
+      confidence: 82 + (index % 16),
+      groundTruth: { label: 'malicious' as const, trueTechnique: family.technique },
+    };
   });
-
-  return benchmarkId;
+  return [...benign, ...malicious];
 }
 
-async function runBenchmark(benchmarkId: string, scenario: Scenario): Promise<void> {
-  const start = Date.now();
-  const latencies: number[] = [];
+export const SCENARIO_INCIDENTS = generateScenarioIncidents();
+let lastBenchmarkReport: BenchmarkResult | null = null;
+const reports = new Map<string, BenchmarkResult>();
+
+function mean(values: number[]): number { return values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length); }
+function percentile(values: number[], percentileValue: number): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.ceil(sorted.length * percentileValue) - 1)] ?? 0;
+}
+
+/** Run every generated incident and calculate measured detection quality and latency. */
+export async function runBenchmark(): Promise<BenchmarkResult> {
+  const startedAt = new Date().toISOString();
+  const allStart = performance.now();
+  const tier0Latencies: number[] = [];
+  const tier1Latencies: number[] = [];
+  const tier2Latencies: number[] = [];
+  const endToEndLatencies: number[] = [];
   let truePositives = 0;
   let falsePositives = 0;
+  let falseNegatives = 0;
 
-  for (let i = 0; i < Math.min(scenario.alertCount, 5); i++) {
-    // Generate synthetic alert
-    const alertStart = Date.now();
-    const synthetic = {
-      id: `INC-BENCH-${benchmarkId.slice(0, 6)}-${i}`,
-      title: `Synthetic ${scenario.name} Alert #${i + 1}`,
-      severity: i < scenario.expectedTruePositives ? 'HIGH' : 'LOW',
-      source: 'BENCHMARK_ENGINE',
-      mitreId: 'T1003.001',
-      mitreName: 'LSASS Memory',
-      mitreTactic: 'Credential Access',
-      hostname: `BENCH-HOST-${i}`,
-      ip: `10.0.${i}.${i + 1}`,
-      confidence: i < scenario.expectedTruePositives ? 88 + Math.random() * 8 : 30 + Math.random() * 20,
-    };
-
-    const alert = normalizeAlert(synthetic, 'SYNTHETIC');
-    await startInvestigation(alert);
-
-    const alertLatency = Date.now() - alertStart;
-    latencies.push(alertLatency);
-
-    if (i < scenario.expectedTruePositives) truePositives++;
-    else falsePositives++;
-
-    // Small delay between alerts
-    await new Promise<void>((r) => setTimeout(r, 100));
+  for (const incident of SCENARIO_INCIDENTS) {
+    const incidentStart = performance.now();
+    const alert = normalizeAlert({ ...incident, source: 'BENCHMARK_ENGINE', raw_log: incident.description }, 'SYNTHETIC');
+    const t0 = performance.now(); await runTier0(alert); tier0Latencies.push(performance.now() - t0);
+    const t1 = performance.now(); await runTier1(alert); tier1Latencies.push(performance.now() - t1);
+    const t2 = performance.now(); await runTier2(alert); tier2Latencies.push(performance.now() - t2);
+    const state = await startInvestigation(alert);
+    const complete = await waitForInvestigation(state.investigationId);
+    const predictedMalicious = (complete?.decision?.finalProbability ?? 0) >= 50;
+    if (predictedMalicious && incident.groundTruth.label === 'malicious') truePositives++;
+    else if (predictedMalicious) falsePositives++;
+    else if (incident.groundTruth.label === 'malicious') falseNegatives++;
+    endToEndLatencies.push(performance.now() - incidentStart);
   }
 
-  const totalMs = Date.now() - start;
   const precision = truePositives / Math.max(1, truePositives + falsePositives);
-  const recall = truePositives / Math.max(1, scenario.expectedTruePositives);
-  const f1Score = 2 * (precision * recall) / Math.max(0.001, precision + recall);
-  const avgLatency = latencies.reduce((s, l) => s + l, 0) / Math.max(1, latencies.length);
-
+  const recall = truePositives / Math.max(1, truePositives + falseNegatives);
+  const mitreDistribution = SCENARIO_INCIDENTS.reduce((distribution, incident) => {
+    distribution[incident.groundTruth.trueTechnique] = (distribution[incident.groundTruth.trueTechnique] ?? 0) + 1;
+    return distribution;
+  }, {} as Record<string, number>);
+  const agentPerformance = Object.fromEntries(agentRegistry.getAll().map((agent) => [agent.role, {
+    avgLatencyMs: Math.round(agent.latencyMs),
+    successRate: Number((1 - agent.errorCount / Math.max(1, agent.totalRequests)).toFixed(4)),
+  }])) as BenchmarkResult['agentPerformance'];
   const result: BenchmarkResult = {
-    scenarioId: scenario.id,
-    scenarioName: scenario.name,
-    startedAt: RUNNING_BENCHMARKS.get(benchmarkId)?.startedAt ?? new Date().toISOString(),
+    scenarioId: 'GENERATED-200',
+    scenarioName: '200-incident labelled scenario suite',
+    startedAt,
     completedAt: new Date().toISOString(),
-    totalAlerts: Math.min(scenario.alertCount, 5),
+    totalAlerts: SCENARIO_INCIDENTS.length,
     truePositives,
     falsePositives,
-    falseNegatives: scenario.expectedTruePositives - truePositives,
-    precision: Math.round(precision * 100) / 100,
-    recall: Math.round(recall * 100) / 100,
-    f1Score: Math.round(f1Score * 100) / 100,
-    avgLatencyMs: Math.round(avgLatency),
-    avgContainmentTimeMs: Math.round(avgLatency * 2.5),
-    mitreCoveragePercent: 95.4,
-    agentPerformance: {
-      COORDINATOR: { avgLatencyMs: 42, successRate: 0.99 },
-      THREAT_INTEL: { avgLatencyMs: 210, successRate: 0.97 },
-      MALWARE: { avgLatencyMs: 380, successRate: 0.98 },
-      CLOUD: { avgLatencyMs: 155, successRate: 0.96 },
-      INCIDENT_RESPONSE: { avgLatencyMs: 98, successRate: 0.99 },
-      COMPLIANCE: { avgLatencyMs: 290, successRate: 0.94 },
-      EDGE: { avgLatencyMs: 480, successRate: 0.91 },
-      DECEPTION: { avgLatencyMs: 65, successRate: 0.98 },
-      HUMAN: { avgLatencyMs: 180000, successRate: 1.0 },
-      FUSION_ENGINE: { avgLatencyMs: 12, successRate: 1.0 },
-    },
-    totalCostUnits: Math.round(totalMs / 1000 * 0.001),
+    falseNegatives,
+    precision: Number(precision.toFixed(4)),
+    recall: Number(recall.toFixed(4)),
+    f1Score: Number((2 * precision * recall / Math.max(0.0001, precision + recall)).toFixed(4)),
+    avgLatencyMs: Math.round(mean(endToEndLatencies)),
+    avgContainmentTimeMs: Math.round(mean(endToEndLatencies)),
+    mitreCoveragePercent: Number((Object.keys(mitreDistribution).length / ATTACK_FAMILIES.length * 100).toFixed(1)),
+    agentPerformance,
+    totalCostUnits: Number(((performance.now() - allStart) / 1000 * 0.001).toFixed(6)),
+    tierLatencyMs: { tier0: Number(mean(tier0Latencies).toFixed(2)), tier1: Number(mean(tier1Latencies).toFixed(2)), tier2: Number(mean(tier2Latencies).toFixed(2)), pipeline: Number(mean(endToEndLatencies).toFixed(2)) },
+    mitreDistribution,
+    p50LatencyMs: Math.round(percentile(endToEndLatencies, 0.5)),
+    p95LatencyMs: Math.round(percentile(endToEndLatencies, 0.95)),
   };
-
-  RUNNING_BENCHMARKS.delete(benchmarkId);
-  COMPLETED_BENCHMARKS.set(benchmarkId, result);
-
-  log.info('Benchmark completed', {
-    meta: {
-      benchmarkId,
-      scenario: scenario.name,
-      precision: result.precision,
-      recall: result.recall,
-      f1Score: result.f1Score,
-      totalMs,
-    },
-  });
+  lastBenchmarkReport = result;
+  reports.set(result.scenarioId, result);
+  log.info('Benchmark completed', { meta: { totalAlerts: result.totalAlerts, precision: result.precision, recall: result.recall, tierLatencyMs: result.tierLatencyMs } });
+  return result;
 }
 
-export function getBenchmarkResult(id: string): BenchmarkResult | null {
-  return COMPLETED_BENCHMARKS.get(id) ?? null;
+export async function startBenchmark(): Promise<string> {
+  const id = randomUUID();
+  const report = await runBenchmark();
+  reports.set(id, report);
+  return id;
 }
-
-export function getBenchmarkStatus(id: string): string | null {
-  if (COMPLETED_BENCHMARKS.has(id)) return 'COMPLETED';
-  return RUNNING_BENCHMARKS.get(id)?.status ?? null;
-}
-
-export function getScenarios(): Scenario[] {
-  return SYNTHETIC_SCENARIOS;
+export function getBenchmarkResult(id: string): BenchmarkResult | null { return reports.get(id) ?? null; }
+export function getBenchmarkStatus(id: string): string | null { return reports.has(id) ? 'COMPLETED' : null; }
+export function getLastBenchmarkReport(): BenchmarkResult | null { return lastBenchmarkReport; }
+export function getScenarios(): ScenarioIncident[] { return SCENARIO_INCIDENTS; }
+export function getScenarioSummary(): { benign: number; malicious: number; mitreDistribution: Record<string, number> } {
+  const mitreDistribution = SCENARIO_INCIDENTS.filter((incident) => incident.groundTruth.label === 'malicious').reduce((distribution, incident) => {
+    distribution[incident.groundTruth.trueTechnique] = (distribution[incident.groundTruth.trueTechnique] ?? 0) + 1;
+    return distribution;
+  }, {} as Record<string, number>);
+  return { benign: 120, malicious: 80, mitreDistribution };
 }

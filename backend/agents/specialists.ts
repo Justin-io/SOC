@@ -71,6 +71,45 @@ async function runAgent(
   }
 }
 
+// ─── Log Analysis Agent ─────────────────────────────────────────────────────
+
+export async function runLogAnalysisAgent(alert: AlertRecord): Promise<EvidenceRecord> {
+  return runAgent('LOG_ANALYSIS', async () => {
+    const incident = alert.incident;
+    const confidence = Math.max(35, Math.min(95, incident.confidence));
+    return {
+      agentRole: 'LOG_ANALYSIS',
+      confidence,
+      likelihoodRatio: confidence >= 70 ? 3.4 : 0.8,
+      reliabilityWeight: 0.9,
+      uncertainty: 0.15,
+      evidence: [makeEvidence(incident.id, 'LOG_ANALYSIS', 'LOG', 'Telemetry Correlation Engine', `Normalized alert telemetry for ${incident.mitreTechnique.id}; correlated source ${incident.source} with asset event sequence.`, 6, confidence, incident.mitreTechnique.id, 'Native Log Correlator')],
+      toolsUsed: ['Native Log Correlator'],
+      executionTimeMs: 0,
+      timestamp: new Date().toISOString(),
+    };
+  });
+}
+
+// ─── Human Approval Agent ───────────────────────────────────────────────────
+
+export async function runHumanApprovalAgent(alert: AlertRecord): Promise<EvidenceRecord> {
+  return runAgent('HUMAN', async () => {
+    const requiresApproval = alert.incident.severity === 'CRITICAL' || alert.incident.severity === 'HIGH';
+    return {
+      agentRole: 'HUMAN',
+      confidence: requiresApproval ? 80 : 55,
+      likelihoodRatio: 1,
+      reliabilityWeight: 1,
+      uncertainty: requiresApproval ? 0.2 : 0.45,
+      evidence: [makeEvidence(alert.incident.id, 'HUMAN', 'AUTH', 'Human Approval Policy', requiresApproval ? 'Human approval policy requires review before containment.' : 'Human approval policy allows local handling for this severity.', 5, requiresApproval ? 80 : 55, alert.incident.mitreTechnique.id, 'Approval Policy Gate')],
+      toolsUsed: ['Approval Policy Gate'],
+      executionTimeMs: 0,
+      timestamp: new Date().toISOString(),
+    };
+  });
+}
+
 // ─── Malware Analysis Agent ──────────────────────────────────────────────────
 
 export async function runMalwareAgent(alert: AlertRecord): Promise<EvidenceRecord> {
@@ -331,7 +370,7 @@ export async function runCoordinatorAgent(alert: AlertRecord): Promise<EvidenceR
         makeEvidence(
           incident.id, 'COORDINATOR', 'LOG',
           'Investigation Plan Synthesis',
-          `Investigation plan generated for ${incident.id}. Threat classification: ${incident.severity}. Agent roster: 8 agents dispatched. Parallel execution groups: [THREAT_INTEL, MALWARE] → [CLOUD, EDGE] → [FUSION_ENGINE] → [INCIDENT_RESPONSE] → [HUMAN]. Historical similarity: 3 prior incidents matched from episodic memory.`,
+          `Investigation plan generated for ${incident.id}. Ten-agent roster dispatched: Coordinator, ThreatIntel, LogAnalysis, Malware, CloudSec, Incident Response, Compliance, HumanApproval, Deception, and EdgeIntegrity.`,
           5,
           90,
           incident.mitreTechnique.id,

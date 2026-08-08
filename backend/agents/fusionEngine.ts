@@ -9,8 +9,7 @@ import type {
   EvidenceRecord, DecisionIntelligence, AlertRecord, AgentRole
 } from '../core/types.js';
 import {
-  bayesianFusion, confidenceInterval, computeDissentScore,
-  dissentLevel, expectedUtility,
+  fuseEvidence, dissentLevel, expectedUtility,
 } from '../intelligence/fusionMath.js';
 import { agentRegistry } from './registry.js';
 import { playbookMemory } from '../memory/playbookMemory.js';
@@ -28,21 +27,14 @@ export async function runFusionEngine(
 
   const incident = alert.incident;
 
-  // Compute posterior probability via Bayesian fusion
-  const fusionInputs = evidenceRecords.map((r) => ({
-    confidence: r.confidence,
-    likelihoodRatio: r.likelihoodRatio,
-    reliabilityWeight: r.reliabilityWeight,
-    uncertainty: r.uncertainty,
-  }));
-
-  const posterior = bayesianFusion(fusionInputs);
-  const [ciLower, ciUpper] = confidenceInterval(posterior, evidenceRecords.length);
-  const dissentScore = computeDissentScore(fusionInputs);
+  const fusion = fuseEvidence(evidenceRecords);
+  const posterior = Math.round(fusion.posterior * 10000) / 100;
+  const ciLower = Math.round(fusion.wilsonLowerBound * 100);
+  const dissentScore = fusion.dissentScore;
   const level = dissentLevel(dissentScore);
 
   // Identify dissenting agents (confidence far from mean)
-  const avgConf = fusionInputs.reduce((s, e) => s + e.confidence, 0) / Math.max(1, fusionInputs.length);
+  const avgConf = evidenceRecords.reduce((s, e) => s + e.confidence, 0) / Math.max(1, evidenceRecords.length);
   const dissentingAgents = evidenceRecords
     .filter((r) => Math.abs(r.confidence - avgConf) > 20)
     .map((r) => r.agentRole);
@@ -55,7 +47,7 @@ export async function runFusionEngine(
   const utility = expectedUtility(posterior, 0.85, 0.15); // 85% risk reduction, 15% disruption
 
   // Risk score = composite of posterior + likelihood ratios
-  const avgLR = fusionInputs.reduce((s, e) => s + Math.log(e.likelihoodRatio), 0) / Math.max(1, fusionInputs.length);
+  const avgLR = evidenceRecords.reduce((s, e) => s + Math.log(Math.max(0.01, e.likelihoodRatio)), 0) / Math.max(1, evidenceRecords.length);
   const riskScore = Math.min(100, Math.round(posterior * 0.6 + Math.exp(avgLR) * 3 + incident.riskScore * 0.2));
 
   const decision: DecisionIntelligence = {
@@ -64,7 +56,8 @@ export async function runFusionEngine(
     dissentLevel: level,
     dissentAgents: dissentingAgents,
     riskScore,
-    confidenceScore: Math.round((ciLower + ciUpper) / 2),
+    // Gating confidence is the conservative Wilson lower bound, never an average.
+    confidenceScore: ciLower,
     recommendedAction,
     counterfactualExplanation: incident.counterfactualExplanation,
     businessImpact: incident.businessImpact,
@@ -84,7 +77,7 @@ export async function runFusionEngine(
       dissentLevel: level,
       dissentingAgents,
       ciLower,
-      ciUpper,
+      requiresHumanGate: fusion.requiresHumanGate,
       utility: utility.toFixed(3),
       latencyMs,
     },

@@ -1,31 +1,16 @@
 /**
  * AEGIS-X Backend — Chronon Prediction Engine
- * Network graph with Laplacian propagation, lateral movement emulation,
- * compromise probability forecasting.
+ * Damped discrete graph-wave propagation over the device or zone topology.
  */
 
 import type { NetworkNode, RiskForecast } from '../core/types.js';
 import { getLogger } from '../core/logger.js';
 
 const log = getLogger('chronon:engine');
-
-// Adjacency weights between node types (propagation likelihood)
-const ADJACENCY_WEIGHTS: Record<string, Record<string, number>> = {
-  GATEWAY:        { SERVER: 0.9, WORKSTATION: 0.7, DATABASE: 0.6, CLOUD_INSTANCE: 0.8, CONTAINER: 0.5 },
-  SERVER:         { DATABASE: 0.8, WORKSTATION: 0.6, CLOUD_INSTANCE: 0.7, CONTAINER: 0.6, GATEWAY: 0.4 },
-  WORKSTATION:    { SERVER: 0.5, DATABASE: 0.3, CLOUD_INSTANCE: 0.4, CONTAINER: 0.3, GATEWAY: 0.3 },
-  DATABASE:       { SERVER: 0.4, WORKSTATION: 0.2, CLOUD_INSTANCE: 0.5, CONTAINER: 0.3, GATEWAY: 0.2 },
-  CLOUD_INSTANCE: { SERVER: 0.7, DATABASE: 0.6, CONTAINER: 0.8, WORKSTATION: 0.4, GATEWAY: 0.5 },
-  CONTAINER:      { SERVER: 0.6, DATABASE: 0.5, CLOUD_INSTANCE: 0.7, WORKSTATION: 0.3, GATEWAY: 0.4 },
-};
-
-function getEdgeWeight(fromType: string, toType: string): number {
-  return ADJACENCY_WEIGHTS[fromType]?.[toType] ?? 0.3;
-}
-
-function riskLevelToScore(level: NetworkNode['riskLevel']): number {
-  return { CLEAN: 5, WARNING: 35, DANGER: 65, CRITICAL: 95 }[level] ?? 20;
-}
+const WAVE_SPEED = 0.8;
+const DELTA_TAU = 1;
+const DAMPING = 0.1;
+const TICKS = 8;
 
 export interface PropagationResult {
   nodeId: string;
@@ -37,89 +22,112 @@ export interface PropagationResult {
   estimatedCompromiseAt?: string;
 }
 
-/**
- * Emulate lateral movement propagation from compromised nodes.
- * Uses simplified graph Laplacian diffusion.
- */
-export function emulatePropagation(
-  nodes: NetworkNode[],
-  steps = 5,
-  timeStepMinutes = 15
-): PropagationResult[] {
-  // Build risk state vector
-  const riskVector = new Map<string, number>(
-    nodes.map((n) => [n.id, riskLevelToScore(n.riskLevel)])
-  );
+export interface WaveRiskField {
+  sourceNodeId?: string;
+  beta: number;
+  field: Array<PropagationResult & { riskField: number }>;
+  topVictims: PropagationResult[];
+}
 
-  // Mark initially compromised nodes
-  const initiallyCompromised = nodes.filter((n) => n.status === 'COMPROMISED' || n.riskLevel === 'CRITICAL');
+function riskLevelToScore(level: NetworkNode['riskLevel']): number {
+  return { CLEAN: 5, WARNING: 35, DANGER: 65, CRITICAL: 95 }[level];
+}
 
-  // Run diffusion steps
-  for (let step = 0; step < steps; step++) {
-    const newRisk = new Map<string, number>(riskVector);
+/** Build A, D, and L = D - A from the explicit network topology. */
+export function buildGraphLaplacian(nodes: NetworkNode[]): { adjacency: number[][]; degree: number[][]; laplacian: number[][]; maxDegree: number } {
+  const count = nodes.length;
+  const indexById = new Map(nodes.map((node, index) => [node.id, index]));
+  const adjacency = Array.from({ length: count }, () => Array<number>(count).fill(0));
 
-    for (const node of nodes) {
-      if (node.status === 'ISOLATED' || node.status === 'EMULATED_ISOLATION') continue;
-
-      let inflow = 0;
-      for (const source of initiallyCompromised) {
-        const weight = getEdgeWeight(source.type, node.type);
-        const sourceRisk = riskVector.get(source.id) ?? 0;
-        inflow += sourceRisk * weight * 0.15; // diffusion coefficient
-      }
-
-      const current = riskVector.get(node.id) ?? 0;
-      newRisk.set(node.id, Math.min(100, current + inflow));
-    }
-
-    for (const [id, risk] of newRisk.entries()) {
-      riskVector.set(id, risk);
+  for (let from = 0; from < count; from++) {
+    if (nodes[from].status === 'ISOLATED' || nodes[from].status === 'EMULATED_ISOLATION') continue;
+    for (const targetId of nodes[from].connections) {
+      const to = indexById.get(targetId);
+      if (to === undefined || from === to || nodes[to].status === 'ISOLATED' || nodes[to].status === 'EMULATED_ISOLATION') continue;
+      adjacency[from][to] = 1;
+      adjacency[to][from] = 1;
     }
   }
 
-  return nodes.map((node) => {
-    const current = riskLevelToScore(node.riskLevel);
-    const forecasted = Math.round(riskVector.get(node.id) ?? current);
-    const propagationStep = node.propagationStep ?? 0;
+  const degrees = adjacency.map((row) => row.reduce((sum, edge) => sum + edge, 0));
+  const degree = Array.from({ length: count }, (_, row) =>
+    Array.from({ length: count }, (_, column) => row === column ? degrees[row] : 0));
+  const laplacian = Array.from({ length: count }, (_, row) =>
+    Array.from({ length: count }, (_, column) => degree[row][column] - adjacency[row][column]));
+  return { adjacency, degree, laplacian, maxDegree: Math.max(0, ...degrees) };
+}
 
-    // Estimate compromise time if risk > 80%
-    const estimatedCompromiseAt = forecasted > 80
-      ? new Date(Date.now() + timeStepMinutes * 60_000 * Math.max(1, (100 - forecasted) / 20)).toISOString()
+function multiplyMatrixVector(matrix: number[][], vector: number[]): number[] {
+  return matrix.map((row) => row.reduce((sum, value, index) => sum + value * vector[index], 0));
+}
+
+/**
+ * Evaluate the documented wave equation and retain the full device-level field.
+ * u_next = (2 - gamma)u - (1 - gamma)u_prev - beta(L @ u)
+ */
+export function computeWaveRiskField(nodes: NetworkNode[]): WaveRiskField {
+  if (nodes.length === 0) return { beta: 0, field: [], topVictims: [] };
+  const { laplacian, maxDegree } = buildGraphLaplacian(nodes);
+  const beta = Math.min((WAVE_SPEED * DELTA_TAU) ** 2, maxDegree > 0 ? 2 / maxDegree : 0);
+  const sourceIndex = nodes.findIndex((node) => node.status === 'COMPROMISED');
+  const selectedSource = sourceIndex >= 0 ? sourceIndex : nodes.findIndex((node) => node.riskLevel === 'CRITICAL');
+  const source = selectedSource >= 0 ? selectedSource : 0;
+  let u = Array<number>(nodes.length).fill(0);
+  u[source] = 1;
+  let previous = u.map((value) => (1 - DAMPING) * value);
+
+  for (let tick = 0; tick < TICKS; tick++) {
+    const laplacianU = multiplyMatrixVector(laplacian, u);
+    const next = u.map((value, index) =>
+      (2 - DAMPING) * value - (1 - DAMPING) * previous[index] - beta * laplacianU[index]);
+    if (next.some((value) => !Number.isFinite(value))) {
+      log.warn('Chronon wave propagation stopped due to non-finite state', { meta: { tick } });
+      break;
+    }
+    previous = u;
+    u = next;
+  }
+
+  const field = nodes.map((node, index) => {
+    const vulnerabilityWeight = Math.max(0, Math.min(1, node.vulnerabilityScore / 10));
+    const riskField = vulnerabilityWeight * Math.max(0, u[index]);
+    const forecastedRisk = Math.min(100, Math.round(riskField * 100));
+    const estimatedCompromiseAt = forecastedRisk > 80
+      ? new Date(Date.now() + Math.max(1, 100 - forecastedRisk) * 60_000).toISOString()
       : undefined;
-
     return {
       nodeId: node.id,
       nodeLabel: node.label,
       nodeType: node.type,
-      currentRisk: current,
-      forecastedRisk: forecasted,
-      propagationStep,
+      currentRisk: riskLevelToScore(node.riskLevel),
+      forecastedRisk,
+      propagationStep: node.propagationStep ?? 0,
       estimatedCompromiseAt,
+      riskField,
     };
   });
+  const topVictims = [...field]
+    .sort((left, right) => right.riskField - left.riskField)
+    .slice(0, 5)
+    .map(({ riskField: _riskField, ...result }) => result);
+  return { sourceNodeId: nodes[source].id, beta, field, topVictims };
 }
 
-/**
- * Generate risk field forecasts for dashboard.
- */
-export function generateRiskForecasts(
-  nodes: NetworkNode[]
-): RiskForecast[] {
-  const propagation = emulatePropagation(nodes);
+/** Return the top five victims by argsort(R), preserving the legacy function name. */
+export function emulatePropagation(nodes: NetworkNode[], _steps = TICKS, _timeStepMinutes = 15): PropagationResult[] {
+  return computeWaveRiskField(nodes).topVictims;
+}
 
-  return propagation.map((p) => ({
+/** Generate dashboard forecasts from the five highest graph-wave risk-field values. */
+export function generateRiskForecasts(nodes: NetworkNode[]): RiskForecast[] {
+  return emulatePropagation(nodes).map((result) => ({
     timestamp: new Date().toISOString(),
-    nodeId: p.nodeId,
-    nodeLabel: p.nodeLabel,
-    currentRisk: p.currentRisk,
-    forecastedRisk: p.forecastedRisk,
-    propagationVelocity: Math.max(0, p.forecastedRisk - p.currentRisk) / 60, // risk units per minute
-    estimatedCompromiseAt: p.estimatedCompromiseAt,
-    interventionRecommendation:
-      p.forecastedRisk > 80
-        ? `URGENT: Isolate ${p.nodeLabel} immediately to prevent cascade.`
-        : p.forecastedRisk > 50
-        ? `MONITOR: Apply network segmentation to ${p.nodeLabel}.`
-        : `NOMINAL: No immediate action required for ${p.nodeLabel}.`,
+    nodeId: result.nodeId,
+    nodeLabel: result.nodeLabel,
+    currentRisk: result.currentRisk,
+    forecastedRisk: result.forecastedRisk,
+    propagationVelocity: Math.max(0, result.forecastedRisk - result.currentRisk) / 8,
+    estimatedCompromiseAt: result.estimatedCompromiseAt,
+    interventionRecommendation: `Contain at zone boundary for ${result.nodeLabel}; review connected logical zones.`,
   }));
 }

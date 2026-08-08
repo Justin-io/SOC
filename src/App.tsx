@@ -17,6 +17,7 @@ import { AuditTrailView } from './components/views/AuditTrailView';
 import { AnalyticsView } from './components/views/AnalyticsView';
 import { ReportsView } from './components/views/ReportsView';
 import { AdministrationView } from './components/views/AdministrationView';
+import { BenchmarkView } from './components/views/BenchmarkView';
 
 import {
   INITIAL_INCIDENTS,
@@ -465,6 +466,8 @@ export default function App() {
           )}
 
           {activeView === 'analytics' && <AnalyticsView />}
+
+          {activeView === 'benchmark' && <BenchmarkView />}
 
           {activeView === 'reports' && (
             <ReportsView

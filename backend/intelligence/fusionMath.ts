@@ -1,163 +1,166 @@
 /**
  * AEGIS-X Backend — Fusion Mathematics
  * Pure, deterministic, side-effect-free mathematical reasoning engine.
- * All functions are pure. No I/O, no state, no logging.
  */
 
-// ─── Bayesian Log-Odds Fusion ──────────────────────────────────────────────
+import type { EvidenceRecord } from '../core/types.js';
 
-/**
- * Convert probability (0-1) to log-odds.
- */
+const PROBABILITY_EPSILON = 1e-6;
+
+function clampProbability(value: number): number {
+  return Math.max(PROBABILITY_EPSILON, Math.min(1 - PROBABILITY_EPSILON, value));
+}
+
+/** Convert a probability in [0, 1] to log-odds. */
 export function probToLogOdds(p: number): number {
-  const clamped = Math.max(0.001, Math.min(0.999, p));
+  const clamped = clampProbability(p);
   return Math.log(clamped / (1 - clamped));
 }
 
-/**
- * Convert log-odds back to probability (0-1).
- */
+/** Convert log-odds back to a probability in [0, 1]. */
 export function logOddsToProb(logOdds: number): number {
-  return 1 / (1 + Math.exp(-logOdds));
+  if (logOdds >= 0) {
+    const expNeg = Math.exp(-logOdds);
+    return 1 / (1 + expNeg);
+  }
+  const expPos = Math.exp(logOdds);
+  return expPos / (1 + expPos);
 }
 
 export interface AgentEvidence {
   confidence: number;          // 0-100
-  likelihoodRatio: number;     // > 0
+  likelihoodRatio: number;     // retained for legacy callers; fusion derives LR from confidence
   reliabilityWeight: number;   // 0-1
   uncertainty: number;         // 0-1
 }
 
+export interface FusionResult {
+  posterior: number;
+  wilsonLowerBound: number;
+  dissentScore: number;
+  requiresHumanGate: boolean;
+}
+
 /**
- * Combine evidence from multiple agents using weighted Bayesian log-odds.
- * Prior is 50% (uninformative). Each agent shifts the posterior.
- * Returns posterior probability 0-100.
+ * Fuse evidence with the documented base-rate-normalised log-odds equation.
+ *
+ * p_i is each agent's reported confidence as a probability, and the effective
+ * weight is reliabilityWeight × (1 - uncertainty). The returned posterior and
+ * Wilson lower bound are probabilities in [0, 1].
  */
-export function bayesianFusion(evidenceList: AgentEvidence[]): number {
-  if (evidenceList.length === 0) return 50;
+export function fuseEvidence(
+  evidences: EvidenceRecord[],
+  prior = 0.04,
+): FusionResult {
+  const normalizedPrior = clampProbability(prior);
+  let logitPosterior = probToLogOdds(normalizedPrior);
 
-  // Uninformative prior: 50%
-  let logOdds = probToLogOdds(0.5);
-
-  for (const e of evidenceList) {
-    const confidence = Math.max(0.01, Math.min(0.99, e.confidence / 100));
-    const likelihoodContrib = Math.log(Math.max(0.01, e.likelihoodRatio));
-    const reliability = Math.max(0.1, Math.min(1.0, e.reliabilityWeight));
-    const uncertaintyPenalty = 1 - e.uncertainty;
-
-    logOdds += likelihoodContrib * reliability * uncertaintyPenalty;
+  for (const evidence of evidences) {
+    const p = clampProbability(evidence.confidence / 100);
+    const likelihoodRatio = (p / (1 - p)) / (normalizedPrior / (1 - normalizedPrior));
+    const weight = Math.max(0, Math.min(1, evidence.reliabilityWeight))
+      * (1 - Math.max(0, Math.min(1, evidence.uncertainty)));
+    logitPosterior += weight * Math.log(likelihoodRatio);
   }
 
-  return Math.round(logOddsToProb(logOdds) * 100);
+  const posterior = logOddsToProb(logitPosterior);
+  const [wilsonLowerBound] = wilsonInterval(posterior, evidences.length);
+  const dissentScore = computeDissentScore(evidences);
+
+  return {
+    posterior,
+    wilsonLowerBound,
+    dissentScore,
+    requiresHumanGate: dissentScore > 1.5,
+  };
 }
 
 /**
- * Compute 95% confidence interval around posterior probability.
- * Uses simplified Wilson interval approximation.
- * Returns [lower, upper] as 0-100.
+ * Legacy percentage API. New callers should use fuseEvidence.
+ * It applies the same 4% base-rate prior rather than an uninformative prior.
  */
-export function confidenceInterval(posterior: number, sampleSize: number): [number, number] {
-  const p = posterior / 100;
+export function bayesianFusion(evidenceList: AgentEvidence[]): number {
+  const records = evidenceList.map((evidence, index) => ({
+    ...evidence,
+    agentRole: 'COORDINATOR' as const,
+    evidence: [],
+    toolsUsed: [],
+    executionTimeMs: 0,
+    timestamp: String(index),
+  }));
+  return Math.round(fuseEvidence(records).posterior * 100);
+}
+
+/** Wilson 95% interval for a probability. */
+export function wilsonInterval(posterior: number, sampleSize: number): [number, number] {
+  const p = clampProbability(posterior);
   const n = Math.max(1, sampleSize);
-  const z = 1.96; // 95% confidence
-
-  const center = (p + (z * z) / (2 * n)) / (1 + (z * z) / n);
-  const spread = (z * Math.sqrt((p * (1 - p) + (z * z) / (4 * n)) / n)) / (1 + (z * z) / n);
-
-  const lower = Math.round(Math.max(0, (center - spread) * 100));
-  const upper = Math.round(Math.min(100, (center + spread) * 100));
-
-  return [lower, upper];
+  const z = 1.96;
+  const denominator = 1 + (z * z) / n;
+  const center = (p + (z * z) / (2 * n)) / denominator;
+  const spread = (z * Math.sqrt((p * (1 - p) + (z * z) / (4 * n)) / n)) / denominator;
+  return [Math.max(0, center - spread), Math.min(1, center + spread)];
 }
 
-/**
- * Compute dissent score across agents.
- * High dissent = agents disagree significantly.
- * Returns 0-100.
- */
-export function computeDissentScore(evidenceList: AgentEvidence[]): number {
+/** Legacy percentage Wilson interval API. */
+export function confidenceInterval(posterior: number, sampleSize: number): [number, number] {
+  const [lower, upper] = wilsonInterval(posterior / 100, sampleSize);
+  return [Math.round(lower * 100), Math.round(upper * 100)];
+}
+
+/** Population standard deviation of agent-confidence logits. */
+export function computeDissentScore(evidenceList: Array<Pick<AgentEvidence, 'confidence'>>): number {
   if (evidenceList.length < 2) return 0;
-
-  const confidences = evidenceList.map((e) => e.confidence);
-  const mean = confidences.reduce((a, b) => a + b, 0) / confidences.length;
-  const variance = confidences.reduce((sum, c) => sum + Math.pow(c - mean, 2), 0) / confidences.length;
-  const stdDev = Math.sqrt(variance);
-
-  // Normalise: stddev of 25 = 50% dissent (arbitrary but reasonable)
-  return Math.min(100, Math.round((stdDev / 25) * 50));
+  const logits = evidenceList.map((evidence) => probToLogOdds(evidence.confidence / 100));
+  const mean = logits.reduce((sum, logit) => sum + logit, 0) / logits.length;
+  const variance = logits.reduce((sum, logit) => sum + (logit - mean) ** 2, 0) / logits.length;
+  return Math.sqrt(variance);
 }
 
 export type DissentLevel = 'NONE' | 'LOW' | 'MODERATE' | 'HIGH';
 
+/** Display-only categorisation for the logit-scale dissent score. */
 export function dissentLevel(score: number): DissentLevel {
-  if (score < 10) return 'NONE';
-  if (score < 30) return 'LOW';
-  if (score < 60) return 'MODERATE';
+  if (score === 0) return 'NONE';
+  if (score < 0.5) return 'LOW';
+  if (score <= 1.5) return 'MODERATE';
   return 'HIGH';
 }
 
-/**
- * Compute expected utility of containment action.
- * EU = (riskReduction * posterior) - (businessDisruption * (1 - posterior))
- * All values 0-1. Returns 0-1.
- */
+/** Expected containment utility; all values are probabilities in [0, 1] except posterior percent. */
 export function expectedUtility(
-  posterior: number,           // 0-100
-  riskReduction: number,       // 0-1: how much risk is reduced by action
-  businessDisruption: number,  // 0-1: operational cost of action
+  posterior: number,
+  riskReduction: number,
+  businessDisruption: number,
 ): number {
   const p = posterior / 100;
   return Math.max(0, Math.min(1, riskReduction * p - businessDisruption * (1 - p)));
 }
 
-/**
- * Poisson anomaly score for a count given expected rate.
- * Returns log-likelihood ratio (higher = more anomalous).
- */
 export function poissonAnomalyScore(observed: number, expectedRate: number): number {
   if (expectedRate <= 0) return observed > 0 ? 10 : 0;
   const lambda = Math.max(0.001, expectedRate);
-  // LLR = observed * log(observed/lambda) - (observed - lambda)
   if (observed === 0) return 0;
   return Math.max(0, observed * Math.log(observed / lambda) - (observed - lambda));
 }
 
-/**
- * Markov surprise: -log P(transition).
- * High surprise = unusual state transition.
- */
 export function markovSurprise(transitionProbability: number): number {
   return -Math.log2(Math.max(0.001, transitionProbability));
 }
 
-/**
- * Conformal prediction: compute whether observation is within calibrated coverage.
- * alpha = miscoverage rate (e.g., 0.05 for 95% coverage).
- * Returns true if observation is considered an outlier.
- */
-export function isConformalAnomaly(score: number, calibratedQuantile: number, alpha = 0.05): boolean {
-  // p-value approximation: score > (1-alpha) quantile → anomaly
-  return score > calibratedQuantile * (1 - alpha);
+export function isConformalAnomaly(score: number, calibratedQuantile: number): boolean {
+  return score > calibratedQuantile;
 }
 
-/**
- * Moving average of last N values.
- */
 export function movingAverage(values: number[], windowSize: number): number {
   if (values.length === 0) return 0;
   const window = values.slice(-windowSize);
   return window.reduce((a, b) => a + b, 0) / window.length;
 }
 
-/**
- * Exponential weighted moving average.
- * alpha: smoothing factor (0-1). Higher = more weight on recent.
- */
 export function ewma(values: number[], alpha = 0.3): number {
   if (values.length === 0) return 0;
   let result = values[0];
-  for (let i = 1; i < values.length; i++) {
-    result = alpha * values[i] + (1 - alpha) * result;
-  }
+  for (let i = 1; i < values.length; i++) result = alpha * values[i] + (1 - alpha) * result;
   return result;
 }

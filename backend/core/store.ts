@@ -207,14 +207,14 @@ const SEED_IOCS: IOCItem[] = [
 ];
 
 const SEED_NETWORK_NODES: NetworkNode[] = [
-  { id: 'node-dc01', label: 'DC01-PROD-EAST', type: 'SERVER', ip: '10.142.4.10', os: 'Windows Server 2022', riskLevel: 'CRITICAL', status: 'COMPROMISED', vulnerabilitiesCount: 3, businessValue: 'HIGH', propagationStep: 0 },
-  { id: 'node-dc02', label: 'DC02-PROD-WEST', type: 'SERVER', ip: '10.142.4.11', os: 'Windows Server 2022', riskLevel: 'WARNING', status: 'ONLINE', vulnerabilitiesCount: 1, businessValue: 'HIGH', propagationStep: 1 },
-  { id: 'node-gateway', label: 'CORP-GATEWAY-01', type: 'GATEWAY', ip: '10.0.0.1', os: 'Palo Alto PAN-OS', riskLevel: 'WARNING', status: 'ONLINE', vulnerabilitiesCount: 0, businessValue: 'HIGH', propagationStep: 1 },
-  { id: 'node-sql', label: 'SQL-PROD-FINANCE', type: 'DATABASE', ip: '10.50.1.20', os: 'SQL Server 2022', riskLevel: 'DANGER', status: 'ONLINE', vulnerabilitiesCount: 2, businessValue: 'HIGH', propagationStep: 2 },
-  { id: 'node-wrk-finance', label: 'WRK-FINANCE-09', type: 'WORKSTATION', ip: '10.10.44.9', os: 'Windows 11', riskLevel: 'DANGER', status: 'ONLINE', vulnerabilitiesCount: 1, businessValue: 'MEDIUM', propagationStep: 2 },
-  { id: 'node-k8s', label: 'K8S-WORKER-04', type: 'CONTAINER', ip: '10.240.1.54', os: 'Ubuntu 22.04 LTS', riskLevel: 'WARNING', status: 'ONLINE', vulnerabilitiesCount: 1, businessValue: 'HIGH', propagationStep: 1 },
-  { id: 'node-aws-s3', label: 'AWS-S3-DATA-LAKE', type: 'CLOUD_INSTANCE', ip: '172.31.12.88', os: 'AWS Managed', riskLevel: 'CRITICAL', status: 'ONLINE', vulnerabilitiesCount: 2, businessValue: 'HIGH', propagationStep: 0 },
-  { id: 'node-wrk-sec', label: 'WRK-SEC-04', type: 'WORKSTATION', ip: '10.10.22.55', os: 'Windows 11', riskLevel: 'CLEAN', status: 'ONLINE', vulnerabilitiesCount: 0, businessValue: 'MEDIUM' },
+  { id: 'node-dc01', label: 'DC01-PROD-EAST', type: 'SERVER', ip: '10.142.4.10', os: 'Windows Server 2022', riskLevel: 'CRITICAL', status: 'COMPROMISED', vulnerabilitiesCount: 3, businessValue: 'HIGH', zone: 'corp-lan', connections: ['node-dc02', 'node-gateway', 'node-sql'], vulnerabilityScore: 9.8, propagationStep: 0 },
+  { id: 'node-dc02', label: 'DC02-PROD-WEST', type: 'SERVER', ip: '10.142.4.11', os: 'Windows Server 2022', riskLevel: 'WARNING', status: 'ONLINE', vulnerabilitiesCount: 1, businessValue: 'HIGH', zone: 'corp-lan', connections: ['node-dc01', 'node-gateway'], vulnerabilityScore: 6.4, propagationStep: 1 },
+  { id: 'node-gateway', label: 'CORP-GATEWAY-01', type: 'GATEWAY', ip: '10.0.0.1', os: 'Palo Alto PAN-OS', riskLevel: 'WARNING', status: 'ONLINE', vulnerabilitiesCount: 0, businessValue: 'HIGH', zone: 'web-tier', connections: ['node-dc01', 'node-dc02', 'node-k8s', 'node-aws-s3'], vulnerabilityScore: 4.2, propagationStep: 1 },
+  { id: 'node-sql', label: 'SQL-PROD-FINANCE', type: 'DATABASE', ip: '10.50.1.20', os: 'SQL Server 2022', riskLevel: 'DANGER', status: 'ONLINE', vulnerabilitiesCount: 2, businessValue: 'HIGH', zone: 'db-tier', connections: ['node-dc01', 'node-wrk-finance'], vulnerabilityScore: 8.7, propagationStep: 2 },
+  { id: 'node-wrk-finance', label: 'WRK-FINANCE-09', type: 'WORKSTATION', ip: '10.10.44.9', os: 'Windows 11', riskLevel: 'DANGER', status: 'ONLINE', vulnerabilitiesCount: 1, businessValue: 'MEDIUM', zone: 'corp-lan', connections: ['node-sql', 'node-wrk-sec'], vulnerabilityScore: 7.2, propagationStep: 2 },
+  { id: 'node-k8s', label: 'K8S-WORKER-04', type: 'CONTAINER', ip: '10.240.1.54', os: 'Ubuntu 22.04 LTS', riskLevel: 'WARNING', status: 'ONLINE', vulnerabilitiesCount: 1, businessValue: 'HIGH', zone: 'web-tier', connections: ['node-gateway', 'node-aws-s3'], vulnerabilityScore: 6.8, propagationStep: 1 },
+  { id: 'node-aws-s3', label: 'AWS-S3-DATA-LAKE', type: 'CLOUD_INSTANCE', ip: '172.31.12.88', os: 'AWS Managed', riskLevel: 'CRITICAL', status: 'ONLINE', vulnerabilitiesCount: 2, businessValue: 'HIGH', zone: 'cloud-data', connections: ['node-gateway', 'node-k8s'], vulnerabilityScore: 9.1, propagationStep: 0 },
+  { id: 'node-wrk-sec', label: 'WRK-SEC-04', type: 'WORKSTATION', ip: '10.10.22.55', os: 'Windows 11', riskLevel: 'CLEAN', status: 'ONLINE', vulnerabilitiesCount: 0, businessValue: 'MEDIUM', zone: 'corp-lan', connections: ['node-wrk-finance'], vulnerabilityScore: 3.1 },
 ];
 
 const SEED_EVIDENCE: EvidenceItem[] = [
@@ -298,6 +298,7 @@ const SEED_SETTINGS: SOCSettings = {
   modelRouting: {
     COORDINATOR: 'gemini-2.0-flash',
     THREAT_INTEL: 'gemini-2.0-flash',
+    LOG_ANALYSIS: 'native-statistical',
     MALWARE: 'gemini-2.0-flash',
     CLOUD: 'gemini-2.0-flash',
     INCIDENT_RESPONSE: 'gemini-2.0-flash',
@@ -308,7 +309,7 @@ const SEED_SETTINGS: SOCSettings = {
     FUSION_ENGINE: 'deterministic-bayesian',
   },
   agentEnabled: {
-    COORDINATOR: true, THREAT_INTEL: true, MALWARE: true, CLOUD: true,
+    COORDINATOR: true, THREAT_INTEL: true, LOG_ANALYSIS: true, MALWARE: true, CLOUD: true,
     INCIDENT_RESPONSE: true, COMPLIANCE: true, EDGE: true, DECEPTION: true,
     HUMAN: true, FUSION_ENGINE: true,
   },

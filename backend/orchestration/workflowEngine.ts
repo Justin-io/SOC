@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { performance } from 'perf_hooks';
 import type {
   AlertRecord, InvestigationState, InvestigationPlan,
   EvidenceRecord, DecisionIntelligence, AgentRole,
@@ -14,12 +15,15 @@ import { runFusionEngine } from '../agents/fusionEngine.js';
 import {
   runMalwareAgent, runCloudAgent, runIncidentResponseAgent,
   runComplianceAgent, runEdgeAgent, runDeceptionAgent, runCoordinatorAgent,
+  runLogAnalysisAgent, runHumanApprovalAgent,
 } from '../agents/specialists.js';
 import { agentRegistry } from '../agents/registry.js';
 import { auditChain } from '../audit/auditChain.js';
 import { episodicMemory } from '../memory/episodicMemory.js';
 import { sseBus } from '../realtime/sseBus.js';
 import { getLogger } from '../core/logger.js';
+import { generateRiskForecasts } from '../chronon/graphEngine.js';
+import { store } from '../core/store.js';
 
 const log = getLogger('orchestration:workflow');
 
@@ -35,6 +39,7 @@ export function getCheckpoint(id: string): InvestigationState | null {
 
 const activeInvestigations = new Map<string, InvestigationState>();
 export const investigations = activeInvestigations;
+const executionPromises = new Map<string, Promise<void>>();
 
 // ─── Plan Generation ──────────────────────────────────────────────────────────
 
@@ -42,39 +47,12 @@ function generatePlan(alert: AlertRecord): InvestigationPlan {
   const severity = alert.incident.severity;
   const mitre = alert.incident.mitreTechnique.id;
 
-  // Determine agent roster dynamically based on severity + MITRE
+  // Every registered specialist contributes evidence for every investigation.
   const agentSequence: AgentRole[] = ['COORDINATOR'];
-  const parallelGroups: AgentRole[][] = [];
-
-  // Always run THREAT_INTEL
-  const group1: AgentRole[] = ['THREAT_INTEL'];
-
-  // Add MALWARE for relevant techniques
-  if (mitre.startsWith('T1003') || mitre.startsWith('T1059') || mitre.startsWith('T1566')) {
-    group1.push('MALWARE');
-  }
-
-  // Add CLOUD for cloud-related techniques
-  if (mitre.startsWith('T1530') || mitre.startsWith('T1078') || mitre.startsWith('T1190')) {
-    group1.push('CLOUD');
-  }
-
-  parallelGroups.push(group1);
-
-  // Compliance for high-severity with PII risk
-  const group2: AgentRole[] = [];
-  if (severity === 'CRITICAL' || severity === 'HIGH') {
-    group2.push('COMPLIANCE');
-    group2.push('DECEPTION');
-  }
-  if (alert.incident.asset.type.toLowerCase().includes('iot') ||
-      alert.incident.asset.type.toLowerCase().includes('embedded')) {
-    group2.push('EDGE');
-  }
-  if (group2.length > 0) parallelGroups.push(group2);
-
-  // Always run FUSION_ENGINE last
-  parallelGroups.push(['FUSION_ENGINE']);
+  const parallelGroups: AgentRole[][] = [[
+    'THREAT_INTEL', 'LOG_ANALYSIS', 'MALWARE', 'CLOUD', 'INCIDENT_RESPONSE',
+    'COMPLIANCE', 'HUMAN', 'DECEPTION', 'EDGE',
+  ]];
 
   // Human approval required for CRITICAL
   const requiresHumanApproval = severity === 'CRITICAL' || severity === 'HIGH';
@@ -85,7 +63,7 @@ function generatePlan(alert: AlertRecord): InvestigationPlan {
     agentSequence,
     parallelGroups,
     terminationConditions: [
-      'FUSION_ENGINE completed',
+      'fusion completed',
       severity === 'CRITICAL' ? 'human_approval_received' : 'auto_approved',
     ],
     fallbackStrategy: 'CONTINUE_WITHOUT_FAILED_AGENT',
@@ -106,18 +84,24 @@ const AGENT_RUNNERS: Partial<Record<AgentRole, (alert: AlertRecord) => Promise<E
   COMPLIANCE: runComplianceAgent,
   EDGE: runEdgeAgent,
   DECEPTION: runDeceptionAgent,
+  LOG_ANALYSIS: runLogAnalysisAgent,
+  HUMAN: runHumanApprovalAgent,
 };
 
 // ─── Main Workflow Execution ──────────────────────────────────────────────────
 
 export async function startInvestigation(alert: AlertRecord): Promise<InvestigationState> {
+  const planStart = performance.now();
   const plan = generatePlan(alert);
+  const planDuration = performance.now() - planStart;
   const state: InvestigationState = {
     investigationId: plan.investigationId,
     incidentId: alert.incident.id,
     plan,
     status: 'PLANNING',
     completedAgents: [],
+    agentStatuses: {},
+    stageDurationsMs: { plan: Math.round(planDuration * 100) / 100 },
     evidenceRecords: [],
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -139,17 +123,18 @@ export async function startInvestigation(alert: AlertRecord): Promise<Investigat
     incidentId: alert.incident.id,
     status: 'PLANNING',
     message: 'Investigation plan generated. Dispatching agent roster.',
-    agentCount: plan.parallelGroups.flat().length,
+    agentCount: plan.parallelGroups.flat().length + 1,
     timestamp: new Date().toISOString(),
   });
 
   // Execute asynchronously without blocking
-  executeWorkflow(alert, state).catch((err) => {
+  const execution = executeWorkflow(alert, state).catch((err) => {
     log.error('Workflow execution error', err, { meta: { investigationId: plan.investigationId } });
     state.status = 'FAILED';
     state.error = err instanceof Error ? err.message : String(err);
     state.updatedAt = new Date().toISOString();
   });
+  executionPromises.set(plan.investigationId, execution);
 
   return state;
 }
@@ -160,9 +145,12 @@ async function executeWorkflow(alert: AlertRecord, state: InvestigationState): P
 
   try {
     // Run COORDINATOR first
+    const triageStart = performance.now();
     const coordEvidence = await safeRunAgent('COORDINATOR', alert);
     state.evidenceRecords.push(coordEvidence);
     state.completedAgents.push('COORDINATOR');
+    state.agentStatuses.COORDINATOR = 'COMPLETED';
+    recordStage(state, 'triage', performance.now() - triageStart);
     publishProgress(state, 'COORDINATOR', coordEvidence.confidence);
 
     // Run parallel groups
@@ -171,6 +159,7 @@ async function executeWorkflow(alert: AlertRecord, state: InvestigationState): P
       if (groupAgents.length === 0) continue;
 
       // Execute group in parallel
+      const fanoutStart = performance.now();
       const results = await Promise.allSettled(
         groupAgents.map((role) => safeRunAgent(role, alert))
       );
@@ -182,31 +171,32 @@ async function executeWorkflow(alert: AlertRecord, state: InvestigationState): P
         if (result.status === 'fulfilled') {
           state.evidenceRecords.push(result.value);
           state.completedAgents.push(role);
+          state.agentStatuses[role] = 'COMPLETED';
           publishProgress(state, role, result.value.confidence);
         } else {
           log.warn(`Agent ${role} failed — continuing investigation`, {
             meta: { error: result.reason?.message },
           });
           // Graceful degradation: continue without this agent
+          state.agentStatuses[role] = 'FAILED';
           publishProgress(state, role, 0, 'FAILED_GRACEFUL');
         }
       }
 
-      // Add INCIDENT_RESPONSE after main analysis
-      if (group.includes('COMPLIANCE') || group.includes('MALWARE')) {
-        const irEvidence = await safeRunAgent('INCIDENT_RESPONSE', alert);
-        state.evidenceRecords.push(irEvidence);
-        state.completedAgents.push('INCIDENT_RESPONSE');
-        publishProgress(state, 'INCIDENT_RESPONSE', irEvidence.confidence);
-      }
+      recordStage(state, 'fanout', performance.now() - fanoutStart);
     }
 
-    // Always run FUSION_ENGINE last
+    const fuseStart = performance.now();
     const decision = await runFusionEngine(alert, state.evidenceRecords);
+    recordStage(state, 'fuse', performance.now() - fuseStart);
     state.decision = decision;
-    state.completedAgents.push('FUSION_ENGINE');
+
+    const forecastStart = performance.now();
+    generateRiskForecasts(store.networkNodes);
+    recordStage(state, 'forecast', performance.now() - forecastStart);
 
     // Determine final status
+    const decideStart = performance.now();
     if (state.plan.requiresHumanApproval) {
       state.status = 'PAUSED_APPROVAL';
       state.pausedAt = new Date().toISOString();
@@ -236,8 +226,10 @@ async function executeWorkflow(alert: AlertRecord, state: InvestigationState): P
       state.completedAt = new Date().toISOString();
       episodicMemory.store_investigation(state);
     }
+    recordStage(state, 'decide', performance.now() - decideStart);
 
     state.updatedAt = new Date().toISOString();
+    alert.incident.pipelineStageDurationsMs = { ...state.stageDurationsMs };
     checkpoints.set(state.investigationId, { ...state });
 
     sseBus.publish('investigation_progress', {
@@ -309,7 +301,18 @@ function publishProgress(
   });
 }
 
+function recordStage(state: InvestigationState, stage: 'triage' | 'plan' | 'fanout' | 'fuse' | 'forecast' | 'decide', durationMs: number): void {
+  state.stageDurationsMs ??= {};
+  state.stageDurationsMs[stage] = Math.round(durationMs * 100) / 100;
+}
+
 export function getInvestigation(id: string): InvestigationState | null {
+  return activeInvestigations.get(id) ?? null;
+}
+
+/** Await a complete/paused investigation for benchmark measurement. */
+export async function waitForInvestigation(id: string): Promise<InvestigationState | null> {
+  await executionPromises.get(id);
   return activeInvestigations.get(id) ?? null;
 }
 

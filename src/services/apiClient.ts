@@ -33,6 +33,24 @@ export interface AIInvestigationResponse {
   modelUsed?: string;
 }
 
+export interface MeasuredMetrics {
+  measuredLatency: { p50EndToEndMs: number; p95EndToEndMs: number; meanEndToEndMs: number; perTierMs: Record<string, number> } | null;
+  costPerIncident: number | null;
+  benchmarkRun: { completedAt: string; totalIncidents: number } | null;
+}
+
+const clientLogger = {
+  warn(event: string, meta: Record<string, unknown> = {}) { console.warn('[AEGIS API]', { event, ...meta }); },
+  error(event: string, meta: Record<string, unknown> = {}) { console.error('[AEGIS API]', { event, ...meta }); },
+};
+
+function mutationHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    ...(typeof window !== 'undefined' && window.location.hostname === 'localhost' ? { 'x-dev-role': 'SOC_LEAD' } : {}),
+  };
+}
+
 class AEGISApiClient {
   private isConnected: boolean = true;
   private sseSource: EventSource | null = null;
@@ -40,6 +58,9 @@ class AEGISApiClient {
   private onLiveEventCallbacks: Array<(data: { id: string; asset: string; severity: string; technique: { id: string; name: string }; timestamp: string; confidence?: number }) => void> = [];
   private onIncidentUpdateCallbacks: Array<(data: any) => void> = [];
   private onConnectionChangeCallbacks: Array<(connected: boolean) => void> = [];
+  private reconnectAttempt = 0;
+  private reconnectTimer: number | null = null;
+  private lastEventId: string | null = null;
 
   constructor() {
     this.initSSE();
@@ -51,7 +72,8 @@ class AEGISApiClient {
     if (!contentType || !contentType.includes('application/json')) return null;
     try {
       return (await res.json()) as T;
-    } catch {
+    } catch (error) {
+      clientLogger.warn('json_parse_failed', { error: String(error) });
       return null;
     }
   }
@@ -59,12 +81,18 @@ class AEGISApiClient {
   private initSSE() {
     if (typeof window === 'undefined') return;
     try {
+      if (this.reconnectTimer !== null) {
+        window.clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
       if (this.sseSource) {
         this.sseSource.close();
       }
-      this.sseSource = new EventSource('/api/events/stream');
+      const resume = this.lastEventId ? `?lastEventId=${encodeURIComponent(this.lastEventId)}` : '';
+      this.sseSource = new EventSource(`/api/events/stream${resume}`);
 
       this.sseSource.onopen = () => {
+        this.reconnectAttempt = 0;
         this.setConnected(true);
       };
 
@@ -74,6 +102,7 @@ class AEGISApiClient {
 
       this.sseSource.addEventListener('telemetry', (e: MessageEvent) => {
         try {
+          this.rememberEventId(e);
           const data = JSON.parse(e.data);
           this.onTelemetryCallbacks.forEach((cb) => cb(data));
         } catch (err) {
@@ -83,6 +112,7 @@ class AEGISApiClient {
 
       this.sseSource.addEventListener('live_event', (e: MessageEvent) => {
         try {
+          this.rememberEventId(e);
           const data = JSON.parse(e.data);
           this.onLiveEventCallbacks.forEach((cb) => cb(data));
         } catch (err) {
@@ -92,6 +122,7 @@ class AEGISApiClient {
 
       this.sseSource.addEventListener('incident_update', (e: MessageEvent) => {
         try {
+          this.rememberEventId(e);
           const data = JSON.parse(e.data);
           this.onIncidentUpdateCallbacks.forEach((cb) => cb(data));
         } catch (err) {
@@ -100,17 +131,48 @@ class AEGISApiClient {
       });
 
       this.sseSource.onerror = () => {
-        // If SSE endpoint returns text/html (e.g. Vercel static rewrite) or disconnects,
-        // close the EventSource to prevent endless browser connection retries and console errors.
+        // Close native EventSource before controlled full-jitter reconnection.
         if (this.sseSource) {
           this.sseSource.close();
           this.sseSource = null;
         }
-        this.setConnected(true);
+        this.setConnected(false);
+        void this.scheduleReconnect();
       };
-    } catch {
-      this.setConnected(true);
+    } catch (error) {
+      clientLogger.warn('sse_initialization_failed', { error: String(error) });
+      this.setConnected(false);
+      void this.scheduleReconnect();
     }
+  }
+
+  private rememberEventId(event: MessageEvent) {
+    if (event.lastEventId) this.lastEventId = event.lastEventId;
+  }
+
+  private async scheduleReconnect(): Promise<void> {
+    if (typeof window === 'undefined' || this.reconnectTimer !== null) return;
+    this.reconnectAttempt++;
+    if (this.reconnectAttempt > 10) {
+      clientLogger.error('sse_retries_exhausted', { lastEventId: this.lastEventId });
+      return;
+    }
+    const cap = Math.min(30_000, 1_000 * (2 ** this.reconnectAttempt));
+    let delay = Math.random() * cap; // full jitter
+    try {
+      const probe = await fetch('/api/events/stream', { method: 'HEAD', headers: this.lastEventId ? { 'Last-Event-ID': this.lastEventId } : undefined });
+      if (probe.status === 429) {
+        const retryAfter = Number(probe.headers.get('Retry-After'));
+        if (Number.isFinite(retryAfter) && retryAfter > 0) delay = retryAfter * 1_000;
+      }
+    } catch (error) {
+      clientLogger.warn('sse_retry_probe_failed', { error: String(error) });
+    }
+    clientLogger.warn('sse_reconnect_scheduled', { attempt: this.reconnectAttempt, delayMs: Math.round(delay), lastEventId: this.lastEventId });
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      this.initSSE();
+    }, delay);
   }
 
   private setConnected(status: boolean) {
@@ -162,7 +224,8 @@ class AEGISApiClient {
           realtimeConnected: this.isConnected,
         };
       }
-    } catch {
+    } catch (error) {
+      clientLogger.warn('health_fetch_failed', { error: String(error) });
       this.setConnected(false);
     }
     return { ...INITIAL_SYSTEM_HEALTH, realtimeConnected: this.isConnected };
@@ -172,7 +235,7 @@ class AEGISApiClient {
     try {
       const res = await fetch('/api/investigate/ai', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mutationHeaders(),
         body: JSON.stringify({
           incidentTitle: incident.title,
           incidentDescription: incident.description,
@@ -198,7 +261,7 @@ class AEGISApiClient {
     try {
       const res = await fetch('/api/reports/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mutationHeaders(),
         body: JSON.stringify({ title, category, focusArea }),
       });
       const data = await this.safeJson<any>(res);
@@ -241,7 +304,7 @@ class AEGISApiClient {
     decision?: DecisionIntelligence;
   }> {
     try {
-      const res = await fetch('/api/v1/emulate', { method: 'POST' });
+      const res = await fetch('/api/v1/emulate', { method: 'POST', headers: mutationHeaders() });
       const json = await this.safeJson<any>(res);
       if (json && json.success && json.data) {
         return json.data;
@@ -262,9 +325,10 @@ class AEGISApiClient {
 
   public async resetStore(): Promise<boolean> {
     try {
-      const res = await fetch('/api/v1/reset', { method: 'POST' });
+      const res = await fetch('/api/v1/reset', { method: 'POST', headers: mutationHeaders() });
       return res.ok;
-    } catch {
+    } catch (error) {
+      clientLogger.warn('store_reset_failed', { error: String(error) });
       return false;
     }
   }
@@ -299,7 +363,7 @@ class AEGISApiClient {
     try {
       const res = await fetch(`/api/v1/decisions/${incidentId}/approve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mutationHeaders(),
         body: JSON.stringify({ action, notes }),
       });
       const json = await this.safeJson<any>(res);
@@ -316,12 +380,46 @@ class AEGISApiClient {
     try {
       const res = await fetch(`/api/v1/incidents/${incidentId}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mutationHeaders(),
         body: JSON.stringify({ status }),
       });
       return res.ok;
-    } catch {
+    } catch (error) {
+      clientLogger.warn('incident_status_update_failed', { error: String(error), incidentId, status });
       return false;
+    }
+  }
+
+  public async fetchMetrics(): Promise<MeasuredMetrics | null> {
+    try {
+      const response = await fetch('/api/v1/metrics');
+      const json = await this.safeJson<{ success: boolean; data?: MeasuredMetrics }>(response);
+      return json?.success ? json.data ?? null : null;
+    } catch (error) {
+      clientLogger.warn('metrics_fetch_failed', { error: String(error) });
+      return null;
+    }
+  }
+
+  public async fetchBenchmark(): Promise<any | null> {
+    try {
+      const response = await fetch('/api/v1/benchmark');
+      const json = await this.safeJson<any>(response);
+      return json?.data ?? null;
+    } catch (error) {
+      clientLogger.warn('benchmark_fetch_failed', { error: String(error) });
+      return null;
+    }
+  }
+
+  public async runBenchmark(): Promise<any | null> {
+    try {
+      const response = await fetch('/api/v1/benchmark', { method: 'POST', headers: mutationHeaders() });
+      const json = await this.safeJson<any>(response);
+      return json?.data ?? null;
+    } catch (error) {
+      clientLogger.warn('benchmark_run_failed', { error: String(error) });
+      return null;
     }
   }
 

@@ -19,6 +19,7 @@ import { Incident, SystemHealthMetrics } from '../../types/soc';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { ViewType } from '../layout/Sidebar';
+import { apiClient, type MeasuredMetrics } from '../../services/apiClient';
 
 interface DashboardViewProps {
   incidents: Incident[];
@@ -36,18 +37,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const activeIncidents = incidents.filter((i) => i.status !== 'RESOLVED' && i.status !== 'FALSE_POSITIVE');
   const criticalIncidents = incidents.filter((i) => i.severity === 'CRITICAL' && i.status !== 'RESOLVED');
 
-  const avgInvestigationTime = '42s';
-  const avgContainmentTime = '3.4m';
-
-  // Dynamic latency fluctuation (280ms - 410ms) to reflect real cloud + edge LLM cascade
-  const [latencyMs, setLatencyMs] = useState<number>(315);
+  const [metrics, setMetrics] = useState<MeasuredMetrics | null>(null);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setLatencyMs(Math.floor(280 + Math.random() * 130));
-    }, 3500);
-    return () => clearInterval(interval);
+    const loadMetrics = () => apiClient.fetchMetrics().then(setMetrics);
+    loadMetrics();
+    const interval = window.setInterval(loadMetrics, 15_000);
+    return () => window.clearInterval(interval);
   }, []);
+  const avgInvestigationTime = metrics?.measuredLatency ? `${(metrics.measuredLatency.p50EndToEndMs / 1000).toFixed(2)}s` : '—';
+  const avgContainmentTime = metrics?.measuredLatency ? `${(metrics.measuredLatency.meanEndToEndMs / 1000).toFixed(2)}s` : '—';
+  const latencyMs = metrics?.measuredLatency?.p50EndToEndMs;
 
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto font-sans">
@@ -109,7 +109,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {avgInvestigationTime}
             </span>
             <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200">
-              -12% vs Q2
+              Measured p50
             </span>
           </div>
         </Card>
@@ -124,14 +124,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {avgContainmentTime}
             </span>
             <span
-              title="3.4m total turnaround includes 2.8m human approval wait. Autonomous containment executes <2s post-approval."
+              title="Measured mean benchmark end-to-end latency."
               className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200 cursor-help"
             >
-              99.4% SLA*
+              Measured mean
             </span>
           </div>
           <div className="text-[9px] text-[#737373] font-mono mt-1 truncate">
-            (Includes 2.8m Human Wait)
+            {metrics?.benchmarkRun ? `${metrics.benchmarkRun.totalIncidents} benchmark incidents` : 'Run benchmark to populate'}
           </div>
         </Card>
 
@@ -142,14 +142,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="mt-1 flex items-baseline justify-between">
             <span className="text-2xl font-bold font-mono text-[#111111]">
-              {latencyMs}ms
+              {latencyMs !== undefined ? `${latencyMs}ms` : '—'}
             </span>
             <span className="text-[10px] font-mono text-purple-700 bg-purple-50 px-1 py-0.5 rounded border border-purple-200">
-              Edge: 78%
+              Measured p50
             </span>
           </div>
           <div className="text-[9px] text-[#737373] font-mono mt-0.5 truncate">
-            T1 Edge: 45ms | T2 Cloud: 270ms
+            {metrics?.measuredLatency ? `T1: ${metrics.measuredLatency.perTierMs.tier1 ?? '—'}ms | T2: ${metrics.measuredLatency.perTierMs.tier2 ?? '—'}ms` : 'No benchmark telemetry yet'}
           </div>
         </Card>
 

@@ -395,10 +395,10 @@ export const INITIAL_AGENTS: AgentMetrics[] = [
     description: 'Synthesizes natural language counterfactuals and manages human override feedback loops.',
   },
   {
-    role: 'FUSION_ENGINE',
-    name: 'Fusion Engine Risk Aggregator',
+    role: 'LOG_ANALYSIS',
+    name: 'Log Analysis Engine',
     status: 'ANALYZING',
-    model: 'gemini-3.1-pro-preview',
+    model: 'native-statistical',
     queueLength: 3,
     healthPercent: 99.6,
     latencyMs: 195,
@@ -412,7 +412,7 @@ export const INITIAL_AGENTS: AgentMetrics[] = [
     executionTimeMs: 210,
     uptimePercent: 99.99,
     lastExecution: '2026-08-07T05:49:58Z',
-    description: 'Computes multi-agent probability distributions, dissent levels, and conformal risk bounds.',
+    description: 'Normalizes and correlates endpoint, network, and authentication logs into evidence records.',
   },
 ];
 
@@ -578,14 +578,14 @@ export const INITIAL_IOCS: IOCItem[] = [
 ];
 
 export const INITIAL_NETWORK_NODES: NetworkNode[] = [
-  { id: 'N1', label: 'Gateway FW', type: 'GATEWAY', ip: '10.0.0.1', os: 'Palo Alto PAN-OS', riskLevel: 'CLEAN', status: 'ONLINE', vulnerabilitiesCount: 0, businessValue: 'HIGH', propagationStep: 0 },
-  { id: 'N2', label: 'Domain Controller DC01', type: 'SERVER', ip: '10.142.4.10', os: 'Windows Server 2025', riskLevel: 'CRITICAL', status: 'COMPROMISED', vulnerabilitiesCount: 4, businessValue: 'HIGH', propagationStep: 1 },
-  { id: 'N3', label: 'Backup DC02', type: 'SERVER', ip: '10.142.4.11', os: 'Windows Server 2025', riskLevel: 'WARNING', status: 'ONLINE', vulnerabilitiesCount: 1, businessValue: 'HIGH', propagationStep: 2 },
-  { id: 'N4', label: 'Core DB Cluster', type: 'DATABASE', ip: '10.142.8.50', os: 'PostgreSQL 17 on Linux', riskLevel: 'DANGER', status: 'ONLINE', vulnerabilitiesCount: 2, businessValue: 'HIGH', propagationStep: 2 },
-  { id: 'N5', label: 'AWS Data Lake S3', type: 'CLOUD_INSTANCE', ip: '172.31.12.88', os: 'AWS Managed', riskLevel: 'CRITICAL', status: 'COMPROMISED', vulnerabilitiesCount: 1, businessValue: 'HIGH', propagationStep: 2 },
-  { id: 'N6', label: 'Workstation WRK-FIN-09', type: 'WORKSTATION', ip: '10.10.4.112', os: 'Windows 11 Enterprise', riskLevel: 'DANGER', status: 'ONLINE', vulnerabilitiesCount: 3, businessValue: 'MEDIUM', propagationStep: 3 },
-  { id: 'N7', label: 'k8s Worker Node 04', type: 'CONTAINER', ip: '10.240.1.54', os: 'Ubuntu 24.04 LTS', riskLevel: 'WARNING', status: 'ONLINE', vulnerabilitiesCount: 5, businessValue: 'MEDIUM', propagationStep: 3 },
-  { id: 'N8', label: 'DNS Resolver Int', type: 'SERVER', ip: '10.0.0.53', os: 'BIND 9 Linux', riskLevel: 'CLEAN', status: 'ONLINE', vulnerabilitiesCount: 0, businessValue: 'LOW', propagationStep: 4 },
+  { id: 'N1', label: 'Gateway FW', type: 'GATEWAY', ip: '10.0.0.1', os: 'Palo Alto PAN-OS', riskLevel: 'CLEAN', status: 'ONLINE', vulnerabilitiesCount: 0, businessValue: 'HIGH', zone: 'web-tier', connections: ['N2', 'N7'], vulnerabilityScore: 3.4, propagationStep: 0 },
+  { id: 'N2', label: 'Domain Controller DC01', type: 'SERVER', ip: '10.142.4.10', os: 'Windows Server 2025', riskLevel: 'CRITICAL', status: 'COMPROMISED', vulnerabilitiesCount: 4, businessValue: 'HIGH', zone: 'corp-lan', connections: ['N1', 'N3', 'N4'], vulnerabilityScore: 9.8, propagationStep: 1 },
+  { id: 'N3', label: 'Backup DC02', type: 'SERVER', ip: '10.142.4.11', os: 'Windows Server 2025', riskLevel: 'WARNING', status: 'ONLINE', vulnerabilitiesCount: 1, businessValue: 'HIGH', zone: 'corp-lan', connections: ['N2', 'N8'], vulnerabilityScore: 6.1, propagationStep: 2 },
+  { id: 'N4', label: 'Core DB Cluster', type: 'DATABASE', ip: '10.142.8.50', os: 'PostgreSQL 17 on Linux', riskLevel: 'DANGER', status: 'ONLINE', vulnerabilitiesCount: 2, businessValue: 'HIGH', zone: 'db-tier', connections: ['N2', 'N6'], vulnerabilityScore: 8.7, propagationStep: 2 },
+  { id: 'N5', label: 'AWS Data Lake S3', type: 'CLOUD_INSTANCE', ip: '172.31.12.88', os: 'AWS Managed', riskLevel: 'CRITICAL', status: 'COMPROMISED', vulnerabilitiesCount: 1, businessValue: 'HIGH', zone: 'cloud-data', connections: ['N7'], vulnerabilityScore: 9.1, propagationStep: 2 },
+  { id: 'N6', label: 'Workstation WRK-FIN-09', type: 'WORKSTATION', ip: '10.10.4.112', os: 'Windows 11 Enterprise', riskLevel: 'DANGER', status: 'ONLINE', vulnerabilitiesCount: 3, businessValue: 'MEDIUM', zone: 'corp-lan', connections: ['N4', 'N8'], vulnerabilityScore: 7.2, propagationStep: 3 },
+  { id: 'N7', label: 'k8s Worker Node 04', type: 'CONTAINER', ip: '10.240.1.54', os: 'Ubuntu 24.04 LTS', riskLevel: 'WARNING', status: 'ONLINE', vulnerabilitiesCount: 5, businessValue: 'MEDIUM', zone: 'web-tier', connections: ['N1', 'N5'], vulnerabilityScore: 6.8, propagationStep: 3 },
+  { id: 'N8', label: 'DNS Resolver Int', type: 'SERVER', ip: '10.0.0.53', os: 'BIND 9 Linux', riskLevel: 'CLEAN', status: 'ONLINE', vulnerabilitiesCount: 0, businessValue: 'LOW', zone: 'corp-lan', connections: ['N3', 'N6'], vulnerabilityScore: 2.8, propagationStep: 4 },
 ];
 
 export const INITIAL_DIGITAL_TWIN: DigitalTwinState = {
@@ -700,6 +700,7 @@ export const INITIAL_SETTINGS: SOCSettings = {
   modelRouting: {
     COORDINATOR: 'gemini-3.1-pro-preview',
     THREAT_INTEL: 'gemini-3.6-flash',
+    LOG_ANALYSIS: 'native-statistical',
     MALWARE: 'gemini-3.1-pro-preview',
     CLOUD: 'gemini-3.6-flash',
     INCIDENT_RESPONSE: 'gemini-3.6-flash',
@@ -712,6 +713,7 @@ export const INITIAL_SETTINGS: SOCSettings = {
   agentEnabled: {
     COORDINATOR: true,
     THREAT_INTEL: true,
+    LOG_ANALYSIS: true,
     MALWARE: true,
     CLOUD: true,
     INCIDENT_RESPONSE: true,

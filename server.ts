@@ -39,6 +39,7 @@
  */
 
 import express, { type Request, type Response, type NextFunction } from 'express';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { createServer as createViteServer } from 'vite';
@@ -68,6 +69,9 @@ import { normalizeAlert } from './backend/ingestion/normalizer.js';
 import { emulateContainment } from './backend/digital-twin/twinEngine.js';
 import { generateRiskForecasts } from './backend/chronon/graphEngine.js';
 import { iocCache } from './backend/memory/iocCache.js';
+import { requirePermission } from './backend/auth/rbac.js';
+import { wrapTelemetryForLLM } from './backend/intelligence/tier2.js';
+import { getLastBenchmarkReport, getScenarioSummary, runBenchmark } from './backend/benchmark/scenarioEngine.js';
 
 const log = getLogger('server');
 const app = express();
@@ -82,12 +86,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader('X-Trace-Id', (req as any).traceId);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Trace-Id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Trace-Id, X-Dev-Role, Last-Event-ID');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
   }
   next();
 });
+
+// Shared API limiter. RATE_LIMIT_WINDOW_MS and RATE_LIMIT_MAX are config-backed.
+app.use('/api', rateLimit({ windowMs: config.rateLimit.windowMs, limit: config.rateLimit.maxRequests, standardHeaders: true, legacyHeaders: false }));
 
 // ─── Gemini Client ──────────────────────────────────────────────────────────
 
@@ -145,6 +152,10 @@ app.get('/api/health', (_req: Request, res: Response) => {
  * GET /api/events/stream
  * SSE endpoint — consumed by frontend EventSource('/api/events/stream')
  */
+app.head('/api/events/stream', (_req: Request, res: Response) => {
+  // Lets the browser client inspect a rate-limit Retry-After before reconnecting.
+  res.sendStatus(204);
+});
 app.get('/api/events/stream', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -153,8 +164,9 @@ app.get('/api/events/stream', (req: Request, res: Response) => {
   res.flushHeaders();
 
   const clientId = (req as any).traceId ?? randomUUID();
-  const lastEventId = req.headers['last-event-id']
-    ? parseInt(req.headers['last-event-id'] as string, 10)
+  const resumeId = req.headers['last-event-id'] ?? req.query.lastEventId;
+  const lastEventId = resumeId
+    ? parseInt(resumeId as string, 10)
     : undefined;
 
   sseBus.addClient(clientId, res, lastEventId);
@@ -164,7 +176,7 @@ app.get('/api/events/stream', (req: Request, res: Response) => {
  * POST /api/investigate/ai
  * AI investigation — consumed by frontend IncidentRoomView
  */
-app.post('/api/investigate/ai', async (req: Request, res: Response) => {
+app.post('/api/investigate/ai', requirePermission('canEscalate'), async (req: Request, res: Response) => {
   try {
     const { incidentTitle, incidentDescription, mitreTechnique, rawEvidence } = req.body;
     const ai = getAI();
@@ -178,31 +190,32 @@ app.post('/api/investigate/ai', async (req: Request, res: Response) => {
       });
     }
 
-    const prompt = `You are the AEGIS-X Chief Autonomous Security Intelligence Engine.
-Analyze this security incident in depth:
-
-Title: ${incidentTitle || 'Unknown Security Event'}
-Description: ${incidentDescription || 'No description provided'}
-MITRE Technique: ${mitreTechnique || 'N/A'}
-Raw Evidence: ${rawEvidence || 'N/A'}
-
-Provide structured operational analysis:
-1. Threat Vector & Attacker Intent Analysis
-2. Counterfactual Reasoning (what evidence if absent would lower risk?)
-3. Immediate 3-step Containment & Remediation Directive
-4. Estimated Business & Compliance Risk
-
-SOC operational format, concise, bulleted.`;
+    const prompt = `You are the AEGIS-X security analysis service. Return JSON only with exactly {"analysis":string}.\n${wrapTelemetryForLLM(JSON.stringify({
+      incidentTitle,
+      incidentDescription,
+      mitreTechnique,
+      rawEvidence,
+      raw_log: req.body.raw_log ?? req.body.rawLog,
+      cmdline: req.body.cmdline,
+    }))}`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.0-flash',
       contents: prompt,
-      config: { temperature: 0.2 },
+      config: { temperature: 0.2, responseMimeType: 'application/json' },
     });
+
+    const json = response.text?.match(/\{[\s\S]*\}/)?.[0];
+    let analysis: string | null = null;
+    try {
+      const parsed = json ? JSON.parse(json) as { analysis?: unknown } : null;
+      analysis = typeof parsed?.analysis === 'string' && parsed.analysis.length > 0 ? parsed.analysis : null;
+    } catch { analysis = null; }
+    if (!analysis) return res.status(502).json({ success: false, error: 'AI response failed schema validation', timestamp: new Date().toISOString() });
 
     return res.json({
       success: true,
-      analysis: response.text || 'Analysis completed.',
+      analysis,
       timestamp: new Date().toISOString(),
       modelUsed: 'gemini-2.0-flash',
     });
@@ -220,7 +233,7 @@ SOC operational format, concise, bulleted.`;
  * POST /api/reports/generate
  * Report generation — consumed by frontend ReportsView
  */
-app.post('/api/reports/generate', async (req: Request, res: Response) => {
+app.post('/api/reports/generate', requirePermission('canGenerateReports'), async (req: Request, res: Response) => {
   try {
     const { title, category, focusArea } = req.body;
     const report = await generateReport({ title, category: category || 'EXECUTIVE', focusArea });
@@ -267,7 +280,7 @@ app.get('/api/v1/incidents/:id', (req: Request, res: Response) => {
   res.json({ success: true, data: { incident, evidence }, timestamp: new Date().toISOString() });
 });
 
-app.patch('/api/v1/incidents/:id/status', (req: Request, res: Response) => {
+app.patch('/api/v1/incidents/:id/status', requirePermission('canEscalate'), (req: Request, res: Response) => {
   const { status } = req.body;
   const incident = store.updateIncidentStatus(req.params.id, status);
   if (!incident) {
@@ -291,7 +304,7 @@ app.patch('/api/v1/incidents/:id/status', (req: Request, res: Response) => {
   res.json({ success: true, data: incident, timestamp: new Date().toISOString() });
 });
 
-app.post('/api/v1/incidents/:id/investigate', async (req: Request, res: Response) => {
+app.post('/api/v1/incidents/:id/investigate', requirePermission('canEscalate'), async (req: Request, res: Response) => {
   const incident = store.getIncident(req.params.id);
   if (!incident) {
     return res.status(404).json({ success: false, error: 'Incident not found', timestamp: new Date().toISOString() });
@@ -325,7 +338,7 @@ app.get('/api/v1/agents/:role', (req: Request, res: Response) => {
   res.json({ success: true, data: agent, timestamp: new Date().toISOString() });
 });
 
-app.patch('/api/v1/agents/:role', (req: Request, res: Response) => {
+app.patch('/api/v1/agents/:role', requirePermission('canManageAgents'), (req: Request, res: Response) => {
   const { model } = req.body;
   if (model) {
     agentRegistry.updateModel(req.params.role as any, model);
@@ -336,7 +349,7 @@ app.patch('/api/v1/agents/:role', (req: Request, res: Response) => {
 
 // ─── v1 API — Intelligence ──────────────────────────────────────────────────
 
-app.post('/api/v1/investigate', async (req: Request, res: Response) => {
+app.post('/api/v1/investigate', requirePermission('canEscalate'), async (req: Request, res: Response) => {
   const { incidentId, rawPayload } = req.body;
 
   let alertRecord;
@@ -371,7 +384,7 @@ app.get('/api/v1/investigations', (_req: Request, res: Response) => {
 
 // ─── Emulation & Telemetry Trigger ─────────────────────────────────────────
 
-app.post(['/api/v1/emulate', '/api/emulate'], async (_req: Request, res: Response) => {
+app.post(['/api/v1/emulate', '/api/emulate'], requirePermission('canEscalate'), async (_req: Request, res: Response) => {
   try {
     const ai = getAI();
     const id = `INC-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
@@ -747,7 +760,7 @@ Respond ONLY with a single valid JSON object. No markdown, no code blocks, no ex
   }
 });
 
-app.post(['/api/v1/reset', '/api/reset'], (_req: Request, res: Response) => {
+app.post(['/api/v1/reset', '/api/reset'], requirePermission('canModifySettings'), (_req: Request, res: Response) => {
   store.clearAll();
   auditChain.append({
     actor: 'HUMAN_OPERATOR',
@@ -778,7 +791,7 @@ app.get('/api/v1/iocs/:value', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/v1/iocs/lookup', async (req: Request, res: Response) => {
+app.post('/api/v1/iocs/lookup', requirePermission('canEscalate'), async (req: Request, res: Response) => {
   const { values } = req.body;
   if (!Array.isArray(values) || values.length === 0) {
     return res.status(400).json({ success: false, error: 'values array required', timestamp: new Date().toISOString() });
@@ -811,7 +824,7 @@ app.get('/api/v1/decisions/:incidentId', (req: Request, res: Response) => {
   res.json({ success: true, data: decision, timestamp: new Date().toISOString() });
 });
 
-app.post('/api/v1/decisions/:investigationId/approve', (req: Request, res: Response) => {
+app.post('/api/v1/decisions/:investigationId/approve', requirePermission('canApproveContainment'), (req: Request, res: Response) => {
   const { action, notes } = req.body;
   const state = approveInvestigation(req.params.investigationId, action, notes);
 
@@ -847,7 +860,7 @@ app.get('/api/v1/reports', (_req: Request, res: Response) => {
   res.json({ success: true, data: store.reports, total: store.reports.length, timestamp: new Date().toISOString() });
 });
 
-app.post('/api/v1/reports/generate', async (req: Request, res: Response) => {
+app.post('/api/v1/reports/generate', requirePermission('canGenerateReports'), async (req: Request, res: Response) => {
   const { title, category, focusArea } = req.body;
   try {
     const report = await generateReport({ title, category: category || 'EXECUTIVE', focusArea });
@@ -979,7 +992,7 @@ app.get('/api/v1/settings', (_req: Request, res: Response) => {
   });
 });
 
-app.put('/api/v1/settings', (req: Request, res: Response) => {
+app.put('/api/v1/settings', requirePermission('canModifySettings'), (req: Request, res: Response) => {
   const newSettings = req.body;
   store.updateSettings(newSettings);
 
@@ -999,7 +1012,7 @@ app.get('/api/v1/network/nodes', (_req: Request, res: Response) => {
   res.json({ success: true, data: store.networkNodes, timestamp: new Date().toISOString() });
 });
 
-app.post('/api/v1/network/emulate', (req: Request, res: Response) => {
+app.post('/api/v1/network/emulate', requirePermission('canApproveContainment'), (req: Request, res: Response) => {
   const { isolateNodeIds = [] } = req.body;
   const result = emulateContainment(store.networkNodes, isolateNodeIds);
 
@@ -1014,6 +1027,17 @@ app.post('/api/v1/network/emulate', (req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
   });
 
+  res.json({ success: true, data: result, timestamp: new Date().toISOString() });
+});
+
+/** Executes the prototype containment action after RBAC approval. */
+app.post('/api/v1/containment/execute', requirePermission('canApproveContainment'), (req: Request, res: Response) => {
+  const targets = Array.isArray(req.body.isolateNodeIds) ? req.body.isolateNodeIds as string[] : [];
+  const result = emulateContainment(store.networkNodes, targets);
+  for (const zone of result.isolatedZones) {
+    for (const node of store.networkNodes.filter((candidate) => candidate.zone === zone)) store.toggleNodeIsolation(node.id);
+  }
+  auditChain.append({ actor: 'HUMAN_OPERATOR', actorType: 'HUMAN', action: 'CONTAINMENT_EXECUTED', details: { zones: result.isolatedZones, recommendations: result.containmentRecommendations } });
   res.json({ success: true, data: result, timestamp: new Date().toISOString() });
 });
 
@@ -1032,8 +1056,23 @@ app.get('/api/v1/chronon/state', (_req: Request, res: Response) => {
 
 // ─── v1 API — Metrics ──────────────────────────────────────────────────────
 
+app.post('/api/v1/benchmark', requirePermission('canEscalate'), async (_req: Request, res: Response) => {
+  try {
+    const report = await runBenchmark();
+    res.json({ success: true, data: report, scenarioSummary: getScenarioSummary(), timestamp: new Date().toISOString() });
+  } catch (error) {
+    log.error('Benchmark failed', error);
+    res.status(500).json({ success: false, error: 'Benchmark failed', timestamp: new Date().toISOString() });
+  }
+});
+
+app.get('/api/v1/benchmark', (_req: Request, res: Response) => {
+  res.json({ success: true, data: getLastBenchmarkReport(), scenarioSummary: getScenarioSummary(), timestamp: new Date().toISOString() });
+});
+
 app.get('/api/v1/metrics', (_req: Request, res: Response) => {
   const agents = agentRegistry.getAll();
+  const benchmark = getLastBenchmarkReport();
   res.json({
     success: true,
     data: {
@@ -1042,6 +1081,14 @@ app.get('/api/v1/metrics', (_req: Request, res: Response) => {
         memoryMb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
         cpuUsage: Number((Math.random() * 12 + 14).toFixed(1)),
       },
+      measuredLatency: benchmark ? {
+        p50EndToEndMs: benchmark.p50LatencyMs,
+        p95EndToEndMs: benchmark.p95LatencyMs,
+        meanEndToEndMs: benchmark.avgLatencyMs,
+        perTierMs: benchmark.tierLatencyMs,
+      } : null,
+      costPerIncident: benchmark ? Number((benchmark.totalCostUnits / Math.max(1, benchmark.totalAlerts)).toFixed(8)) : null,
+      benchmarkRun: benchmark ? { completedAt: benchmark.completedAt, totalIncidents: benchmark.totalAlerts } : null,
       agents: agents.map((a) => ({
         role: a.role,
         status: a.status,

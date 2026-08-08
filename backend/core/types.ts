@@ -20,6 +20,7 @@ export type IncidentStatus =
 export type AgentRole =
   | 'COORDINATOR'
   | 'THREAT_INTEL'
+  | 'LOG_ANALYSIS'
   | 'MALWARE'
   | 'CLOUD'
   | 'INCIDENT_RESPONSE'
@@ -67,6 +68,7 @@ export interface Incident {
   counterfactualExplanation: string;
   likelihoodRatio: number;
   predictedNextTarget?: string;
+  pipelineStageDurationsMs?: Partial<Record<'triage' | 'plan' | 'fanout' | 'fuse' | 'forecast' | 'decide', number>>;
 }
 
 export interface AgentMetrics {
@@ -171,6 +173,12 @@ export interface NetworkNode {
   status: NodeStatus;
   vulnerabilitiesCount: number;
   businessValue: 'HIGH' | 'MEDIUM' | 'LOW';
+  /** Logical containment zone, e.g. web-tier or db-tier. */
+  zone: string;
+  /** Device-level adjacency used to build the graph Laplacian. */
+  connections: string[];
+  /** CVSS base score in [0, 10], used as the wave risk-field weight. */
+  vulnerabilityScore: number;
   propagationStep?: number;
 }
 
@@ -309,6 +317,7 @@ export interface InvestigationState {
   plan: InvestigationPlan;
   status: 'PLANNING' | 'RUNNING' | 'PAUSED_APPROVAL' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
   completedAgents: AgentRole[];
+  agentStatuses: Partial<Record<AgentRole, 'COMPLETED' | 'FAILED'>>;
   evidenceRecords: EvidenceRecord[];
   decision?: DecisionIntelligence;
   startedAt: string;
@@ -316,6 +325,7 @@ export interface InvestigationState {
   pausedAt?: string;
   completedAt?: string;
   error?: string;
+  stageDurationsMs?: Partial<Record<'triage' | 'plan' | 'fanout' | 'fuse' | 'forecast' | 'decide', number>>;
 }
 
 export interface IOCLookupResult {
@@ -344,6 +354,10 @@ export interface BenchmarkResult {
   mitreCoveragePercent: number;
   agentPerformance: Record<AgentRole, { avgLatencyMs: number; successRate: number }>;
   totalCostUnits: number;
+  tierLatencyMs?: Record<string, number>;
+  mitreDistribution?: Record<string, number>;
+  p50LatencyMs?: number;
+  p95LatencyMs?: number;
 }
 
 export interface RiskForecast {

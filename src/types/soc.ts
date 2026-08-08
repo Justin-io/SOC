@@ -16,6 +16,7 @@ export type IncidentStatus =
 export type AgentRole =
   | 'COORDINATOR'
   | 'THREAT_INTEL'
+  | 'LOG_ANALYSIS'
   | 'MALWARE'
   | 'CLOUD'
   | 'INCIDENT_RESPONSE'
@@ -59,6 +60,7 @@ export interface Incident {
   counterfactualExplanation: string;
   likelihoodRatio: number;
   predictedNextTarget?: string;
+  pipelineStageDurationsMs?: Partial<Record<'triage' | 'plan' | 'fanout' | 'fuse' | 'forecast' | 'decide', number>>;
 }
 
 export interface AgentMetrics {
@@ -154,6 +156,9 @@ export interface NetworkNode {
   status: 'ONLINE' | 'ISOLATED' | 'COMPROMISED' | 'EMULATED_ISOLATION';
   vulnerabilitiesCount: number;
   businessValue: 'HIGH' | 'MEDIUM' | 'LOW';
+  zone: string;
+  connections: string[];
+  vulnerabilityScore: number;
   propagationStep?: number;
 }
 

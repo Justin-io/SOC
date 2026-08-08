@@ -7,6 +7,7 @@
 import { randomUUID } from 'crypto';
 import type { AlertRecord, Incident, ProcessingState } from '../core/types.js';
 import { getLogger } from '../core/logger.js';
+import { updateTwinFromTelemetry } from '../digital-twin/twinEngine.js';
 
 const log = getLogger('ingestion:normalizer');
 
@@ -103,7 +104,7 @@ export function normalizeAlert(
     meta: { incidentId: id, sourceType, mitreHints, enrichmentLatencyMs },
   });
 
-  return {
+  const alert: AlertRecord = {
     traceId,
     correlationId: (rawPayload.correlationId as string) ?? traceId,
     tenantId,
@@ -115,4 +116,7 @@ export function normalizeAlert(
     mitreHints,
     enrichmentLatencyMs,
   };
+  // Event-source the twin from every normalized alert; only known endpoints create edges.
+  updateTwinFromTelemetry(alert);
+  return alert;
 }

@@ -10,6 +10,7 @@ import {
   Clock,
   FileCheck2,
   BarChart3,
+  FlaskConical,
   FileText,
   Sliders,
   ChevronLeft,
@@ -28,6 +29,7 @@ export type ViewType =
   | 'chronon'
   | 'audit-trail'
   | 'analytics'
+  | 'benchmark'
   | 'reports'
   | 'administration';
 
@@ -84,6 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'chronon' as ViewType, label: 'Chronon Visualization', icon: Clock },
     { id: 'audit-trail' as ViewType, label: 'Audit Trail', icon: FileCheck2 },
     { id: 'analytics' as ViewType, label: 'Analytics', icon: BarChart3 },
+    { id: 'benchmark' as ViewType, label: 'Benchmark', icon: FlaskConical },
     { id: 'reports' as ViewType, label: 'Reports', icon: FileText },
     { id: 'administration' as ViewType, label: 'Administration', icon: Sliders },
   ];
