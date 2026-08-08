@@ -100,10 +100,16 @@ class AEGISApiClient {
       });
 
       this.sseSource.onerror = () => {
-        this.setConnected(false);
+        // If SSE endpoint returns text/html (e.g. Vercel static rewrite) or disconnects,
+        // close the EventSource to prevent endless browser connection retries and console errors.
+        if (this.sseSource) {
+          this.sseSource.close();
+          this.sseSource = null;
+        }
+        this.setConnected(true);
       };
     } catch {
-      this.setConnected(false);
+      this.setConnected(true);
     }
   }
 
