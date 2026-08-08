@@ -274,42 +274,14 @@ export default function App() {
   const handleGenerateReport = async (category: string) => {
     setIsGeneratingReport(true);
     try {
-      const res = await fetch('/api/reports/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: `Autonomous SOC Executive Briefing ${new Date().toISOString().slice(0, 10)}`,
-          category,
-          focusArea: 'Enterprise Identity & Infrastructure Defense',
-        }),
-      });
-      const data = await res.json();
-      if (data.report) {
-        const newRep: SOCReport = {
-          id: data.report.id,
-          title: data.report.title,
-          date: new Date().toISOString().slice(0, 10),
-          generatedAt: new Date().toISOString(),
-          category: data.report.category,
-          summary: data.report.summary,
-          author: data.report.author || 'AEGIS-X AI Engine',
-          generatedBy: data.report.author || 'AEGIS-X AI Engine',
-          status: 'READY',
-          downloadUrl: '#',
-          keyFindings: [
-            'Mean Time to Contain (MTTC) sustained at 3.4 minutes.',
-            'Zero unhandled critical incidents within SLA timeframe.',
-            'MITRE ATT&CK coverage verified at 95.4%.',
-          ],
-          recommendations: [
-            'Enforce gMSA for Active Directory service accounts.',
-            'Harden kerberos ticket encryption algorithms to AES256.',
-          ],
-        };
-        setReports((prev) => [newRep, ...prev]);
-      }
+      const report = await apiClient.generateReport(
+        `Autonomous SOC Executive Briefing ${new Date().toISOString().slice(0, 10)}`,
+        category,
+        'Enterprise Identity & Infrastructure Defense'
+      );
+      setReports((prev) => [report, ...prev]);
     } catch {
-      // Fallback local report
+      // Fallback handled inside apiClient
     } finally {
       setIsGeneratingReport(false);
     }
