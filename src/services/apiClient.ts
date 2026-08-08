@@ -59,7 +59,7 @@ class AEGISApiClient {
   private fallbackSimulatorTimer: number | null = null;
   private isStandaloneMode: boolean = false;
 
-  // Local In-Memory Store for Pure Frontend Execution
+  // Local In-Memory State for Pure Frontend Standalone Execution
   private localIncidents: Incident[] = [...INITIAL_INCIDENTS];
   private localAgents: AgentMetrics[] = [...INITIAL_AGENTS];
   private localEvidence: EvidenceItem[] = [...INITIAL_EVIDENCE];
@@ -75,7 +75,7 @@ class AEGISApiClient {
   private localHealth: SystemHealthMetrics = { ...INITIAL_SYSTEM_HEALTH };
 
   constructor() {
-    this.initSSE();
+    void this.checkAndInitSSE();
   }
 
   private async safeJson<T>(res: Response): Promise<T | null> {
@@ -89,7 +89,40 @@ class AEGISApiClient {
     }
   }
 
-  private initSSE() {
+  /**
+   * Silently probes the SSE endpoint using fetch before instantiating EventSource.
+   * If the endpoint does not explicitly return 'text/event-stream' (e.g. static HTML fallback),
+   * it smoothly switches to Frontend Standalone Engine WITHOUT throwing browser EventSource console errors.
+   */
+  private async checkAndInitSSE() {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1200);
+
+      const res = await fetch('/api/events/stream', {
+        method: 'GET',
+        headers: { Accept: 'text/event-stream' },
+        signal: controller.signal,
+      }).catch(() => null);
+
+      clearTimeout(timeoutId);
+
+      const contentType = res?.headers.get('content-type');
+      if (res && res.ok && contentType && contentType.includes('text/event-stream')) {
+        // Backend SSE stream confirmed — initialize native EventSource
+        this.initNativeEventSource();
+      } else {
+        // Pure frontend mode — activate browser simulation quietly
+        this.activateStandaloneMode();
+      }
+    } catch {
+      this.activateStandaloneMode();
+    }
+  }
+
+  private initNativeEventSource() {
     if (typeof window === 'undefined') return;
     try {
       if (this.reconnectTimer !== null) {
@@ -143,13 +176,8 @@ class AEGISApiClient {
           this.sseSource.close();
           this.sseSource = null;
         }
-        this.reconnectAttempt++;
-        if (this.reconnectAttempt > 2) {
-          // Switch smoothly to Frontend Standalone Engine
-          this.activateStandaloneMode();
-        } else {
-          void this.scheduleReconnect();
-        }
+        // Switch quietly to Frontend Standalone Engine on error
+        this.activateStandaloneMode();
       };
     } catch {
       this.activateStandaloneMode();
@@ -158,6 +186,10 @@ class AEGISApiClient {
 
   private activateStandaloneMode() {
     this.isStandaloneMode = true;
+    if (this.sseSource) {
+      this.sseSource.close();
+      this.sseSource = null;
+    }
     this.setConnected(true);
     this.startFallbackSimulator();
   }
@@ -166,11 +198,10 @@ class AEGISApiClient {
     if (typeof window === 'undefined' || this.fallbackSimulatorTimer !== null) return;
 
     this.fallbackSimulatorTimer = window.setInterval(() => {
-      // Smooth browser-side live telemetry simulation
+      // Smooth client-side live telemetry simulation
       const timeMs = Date.now();
       const simulatedCpu = Number((20 + Math.sin(timeMs / 4000) * 4 + Math.random() * 2).toFixed(1));
       const simulatedMemory = Number((42 + Math.cos(timeMs / 6000) * 3 + Math.random() * 1.5).toFixed(1));
-      const simulatedLatency = Math.round(90 + Math.random() * 35);
 
       const telemetryData: Partial<SystemHealthMetrics> = {
         cpuUsage: simulatedCpu,
@@ -214,16 +245,6 @@ class AEGISApiClient {
 
   private rememberEventId(event: MessageEvent) {
     if (event.lastEventId) this.lastEventId = event.lastEventId;
-  }
-
-  private async scheduleReconnect(): Promise<void> {
-    if (typeof window === 'undefined' || this.reconnectTimer !== null || this.isStandaloneMode) return;
-    const delay = Math.min(5000, 1000 * Math.pow(2, this.reconnectAttempt));
-
-    this.reconnectTimer = window.setTimeout(() => {
-      this.reconnectTimer = null;
-      this.initSSE();
-    }, delay);
   }
 
   private setConnected(status: boolean) {
@@ -299,7 +320,7 @@ class AEGISApiClient {
       } catch {}
     }
 
-    // Client-side AI investigation fallback
+    // Client-side AI investigation engine
     return {
       success: true,
       analysis: `### AEGIS-X Automated Multi-Agent Investigation Report
