@@ -233,11 +233,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <tr
                           key={inc.id}
                           onClick={() => onNavigateView('incident-room', inc.id)}
-                          className={`cursor-pointer transition-colors group ${
-                            isDeception
+                          className={`cursor-pointer transition-colors group ${isDeception
                               ? 'bg-purple-50/70 border-l-4 border-l-purple-600 hover:bg-purple-100/70'
                               : 'hover:bg-[#FAFAFA]'
-                          }`}
+                            }`}
                         >
                           <td className="py-3 px-4 font-bold text-[#111111] group-hover:underline">
                             <div className="flex items-center gap-1.5">
