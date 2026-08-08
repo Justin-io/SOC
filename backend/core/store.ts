@@ -13,6 +13,25 @@ import type {
 
 const SEED_INCIDENTS: Incident[] = [
   {
+    id: 'INC-2026-9046',
+    title: 'Deception Honey-Token Triggered on Storage Vault',
+    severity: 'HIGH',
+    status: 'TRIAGED',
+    asset: { id: 'AST-HONEY-01', hostname: 'HONEY-VAULT-DB', ip: '10.99.99.15', type: 'Deception Asset', criticality: 'LOW', owner: 'Security Operations (Deception Mesh)' },
+    source: 'AEGIS-X Deception Engine',
+    mitreTechnique: { id: 'T1083', name: 'File and Directory Discovery', tactic: 'Discovery' },
+    confidence: 99, riskScore: 89, dissentScore: 2,
+    timestamp: '2026-08-07T05:45:00Z',
+    description: 'Fake SQL admin credentials stored in deception vault accessed by internal IP 10.10.8.44.',
+    assignedAgent: 'DECEPTION', affectedSystemsCount: 1,
+    containmentImpact: 'Directly points to internal insider threat or compromised host 10.10.8.44.',
+    businessImpact: 'Deception token holds no production data. Direct high-fidelity alert.',
+    recommendedAction: 'Quarantine IP 10.10.8.44 immediately and inspect active logon sessions.',
+    counterfactualExplanation: 'Deception asset zero legitimate traffic threshold guarantees 99%+ alert fidelity.',
+    likelihoodRatio: 42.0,
+    predictedNextTarget: 'k8s-worker-node-04 (88% Risk)',
+  },
+  {
     id: 'INC-2026-9041',
     title: 'Kerberoasting & LSASS Memory Extraction on Domain Controller',
     severity: 'CRITICAL',
@@ -29,6 +48,7 @@ const SEED_INCIDENTS: Incident[] = [
     recommendedAction: 'Isolate host DC01-PROD-EAST immediately, purge compromised SPN tickets, force krbtgt password reset.',
     counterfactualExplanation: 'Without LSASS memory dump evidence, threat level drops to MEDIUM. However, memory dump + TGS-REQ RC4 confirms active credential theft.',
     likelihoodRatio: 18.4,
+    predictedNextTarget: 'k8s-worker-node-04 (88% Risk)',
   },
   {
     id: 'INC-2026-9042',
@@ -47,6 +67,7 @@ const SEED_INCIDENTS: Incident[] = [
     recommendedAction: 'Attach explicit Deny * inline IAM policy to compromised role SecurityOpsAdminRole.',
     counterfactualExplanation: 'If IP 185.220.101.45 belonged to developer VPN, risk would be LOW. CloudTrail geolocated IP to unapproved autonomous system.',
     likelihoodRatio: 14.2,
+    predictedNextTarget: 'aws-iam-master-role (91% Risk)',
   },
   {
     id: 'INC-2026-9043',
@@ -65,6 +86,7 @@ const SEED_INCIDENTS: Incident[] = [
     recommendedAction: 'Cordon k8s-worker-node-04 immediately. Revoke cluster-admin service account. Apply egress NetworkPolicy.',
     counterfactualExplanation: 'Without the privileged container flag in pod spec, escape to host would be significantly more difficult.',
     likelihoodRatio: 9.8,
+    predictedNextTarget: 'host-kernel-node-01 (85% Risk)',
   },
   {
     id: 'INC-2026-9044',
@@ -83,6 +105,7 @@ const SEED_INCIDENTS: Incident[] = [
     recommendedAction: 'Isolate WRK-FINANCE-09, force NTLM authentication disable via GPO, rotate impacted NTLM hashes.',
     counterfactualExplanation: 'If SMB signing was enforced network-wide, Pass-the-Hash would fail silently. Current policy gap enables this vector.',
     likelihoodRatio: 7.3,
+    predictedNextTarget: 'DC01-PROD-EAST (79% Risk)',
   },
   {
     id: 'INC-2026-9045',
@@ -101,6 +124,7 @@ const SEED_INCIDENTS: Incident[] = [
     recommendedAction: 'Review and tighten PowerShell Constrained Language Mode. Audit AppLocker policy on security workstations.',
     counterfactualExplanation: 'Without AMSI bypass attempt pattern, this would classify as authorized admin activity.',
     likelihoodRatio: 4.1,
+    predictedNextTarget: 'INT-GATEWAY-02 (64% Risk)',
   },
 ];
 

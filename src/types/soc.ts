@@ -58,6 +58,7 @@ export interface Incident {
   recommendedAction: string;
   counterfactualExplanation: string;
   likelihoodRatio: number;
+  predictedNextTarget?: string;
 }
 
 export interface AgentMetrics {

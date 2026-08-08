@@ -7,6 +7,8 @@ import {
   ArrowUpDown,
   ExternalLink,
   Lock,
+  Compass,
+  Target,
 } from 'lucide-react';
 import { Incident, Severity, IncidentStatus } from '../../types/soc';
 import { Badge } from '../ui/Badge';
@@ -90,7 +92,7 @@ export const LiveIncidentsView: React.FC<LiveIncidentsViewProps> = ({
   };
 
   const handleExportCSV = () => {
-    const headers = ['ID', 'Title', 'Severity', 'Status', 'Asset', 'IP', 'MITRE', 'Confidence', 'Timestamp'];
+    const headers = ['ID', 'Title', 'Severity', 'Status', 'Asset', 'IP', 'MITRE', 'Predicted Next Target', 'Confidence', 'Timestamp'];
     const rows = sorted.map((i) => [
       i.id,
       `"${i.title.replace(/"/g, '""')}"`,
@@ -99,6 +101,7 @@ export const LiveIncidentsView: React.FC<LiveIncidentsViewProps> = ({
       i.asset.hostname,
       i.asset.ip,
       i.mitreTechnique.id,
+      `"${i.predictedNextTarget || ''}"`,
       i.confidence,
       i.timestamp,
     ]);
@@ -226,6 +229,7 @@ export const LiveIncidentsView: React.FC<LiveIncidentsViewProps> = ({
                 <th className="py-2.5 px-3 font-semibold">Target Asset</th>
                 <th className="py-2.5 px-3 font-semibold">MITRE Technique</th>
                 <th className="py-2.5 px-3 font-semibold">Status</th>
+                <th className="py-2.5 px-3 font-semibold">Predicted Next Target</th>
                 <th
                   onClick={() => toggleSort('confidence')}
                   className="py-2.5 px-3 font-semibold text-right cursor-pointer hover:text-[#111111]"
@@ -241,71 +245,94 @@ export const LiveIncidentsView: React.FC<LiveIncidentsViewProps> = ({
             <tbody className="divide-y divide-[#E5E5E5] font-mono">
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-xs text-[#737373]">
+                  <td colSpan={10} className="py-12 text-center text-xs text-[#737373]">
                     No security incidents match the current filters.
                   </td>
                 </tr>
               ) : (
-                sorted.map((inc) => (
-                  <tr
-                    key={inc.id}
-                    className="hover:bg-[#FAFAFA] transition-colors group"
-                  >
-                    <td className="py-3 px-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedIncidents.includes(inc.id)}
-                        onChange={() => handleToggleSelectOne(inc.id)}
-                        className="rounded border-[#E5E5E5]"
-                      />
-                    </td>
-                    <td
-                      onClick={() => onNavigateView('incident-room', inc.id)}
-                      className="py-3 px-3 font-bold text-[#111111] cursor-pointer hover:underline"
+                sorted.map((inc) => {
+                  const isDeception =
+                    inc.source.includes('Deception Engine') || inc.id.includes('9046');
+
+                  return (
+                    <tr
+                      key={inc.id}
+                      className={`transition-colors group ${
+                        isDeception
+                          ? 'bg-purple-50/70 border-l-4 border-l-purple-600 hover:bg-purple-100/70'
+                          : 'hover:bg-[#FAFAFA]'
+                      }`}
                     >
-                      {inc.id}
-                    </td>
-                    <td
-                      onClick={() => onNavigateView('incident-room', inc.id)}
-                      className="py-3 px-3 font-sans max-w-[320px] cursor-pointer"
-                    >
-                      <div className="font-semibold text-[#111111] group-hover:underline">
-                        {inc.title}
-                      </div>
-                      <div className="text-[11px] text-[#737373] truncate font-mono mt-0.5">
-                        {inc.description}
-                      </div>
-                    </td>
-                    <td className="py-3 px-3">
-                      <Badge severity={inc.severity} />
-                    </td>
-                    <td className="py-3 px-3">
-                      <div className="font-semibold text-[#111111]">{inc.asset.hostname}</div>
-                      <div className="text-[10px] text-[#737373]">{inc.asset.ip}</div>
-                    </td>
-                    <td className="py-3 px-3">
-                      <div className="inline-block bg-[#F4F4F5] border border-[#E5E5E5] px-1.5 py-0.5 rounded text-[10px] text-[#111111]">
-                        {inc.mitreTechnique.id}
-                      </div>
-                    </td>
-                    <td className="py-3 px-3">
-                      <Badge status={inc.status} />
-                    </td>
-                    <td className="py-3 px-3 text-right font-bold text-[#111111]">
-                      {inc.confidence}%
-                    </td>
-                    <td className="py-3 px-3 text-right whitespace-nowrap">
-                      <Button
-                        variant="secondary"
-                        size="sm"
+                      <td className="py-3 px-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedIncidents.includes(inc.id)}
+                          onChange={() => handleToggleSelectOne(inc.id)}
+                          className="rounded border-[#E5E5E5]"
+                        />
+                      </td>
+                      <td
                         onClick={() => onNavigateView('incident-room', inc.id)}
+                        className="py-3 px-3 font-bold text-[#111111] cursor-pointer hover:underline"
                       >
-                        <span>Investigate</span>
-                        <ExternalLink size={11} className="ml-1" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))
+                        <div className="flex items-center gap-1">
+                          {isDeception && <Target size={13} className="text-purple-600 animate-pulse" />}
+                          <span>{inc.id}</span>
+                        </div>
+                      </td>
+                      <td
+                        onClick={() => onNavigateView('incident-room', inc.id)}
+                        className="py-3 px-3 font-sans max-w-[320px] cursor-pointer"
+                      >
+                        <div className="font-semibold text-[#111111] group-hover:underline flex items-center gap-1.5">
+                          <span>{inc.title}</span>
+                          {isDeception && (
+                            <span className="text-[10px] bg-purple-100 text-purple-900 border border-purple-300 font-mono font-bold px-1.5 py-0.5 rounded">
+                              🎯 Deception Mesh
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-[#737373] truncate font-mono mt-0.5">
+                          {inc.description}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <Badge severity={inc.severity} />
+                      </td>
+                      <td className="py-3 px-3">
+                        <div className="font-semibold text-[#111111]">{inc.asset.hostname}</div>
+                        <div className="text-[10px] text-[#737373]">{inc.asset.ip}</div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <div className="inline-block bg-[#F4F4F5] border border-[#E5E5E5] px-1.5 py-0.5 rounded text-[10px] text-[#111111]">
+                          {inc.mitreTechnique.id}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <Badge status={inc.status} />
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded text-[10px] font-mono font-semibold">
+                          <Compass size={11} className="text-amber-600" />
+                          <span>{inc.predictedNextTarget || 'k8s-worker-node-04 (88% Risk)'}</span>
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-right font-bold text-[#111111]">
+                        {inc.confidence}%
+                      </td>
+                      <td className="py-3 px-3 text-right whitespace-nowrap">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => onNavigateView('incident-room', inc.id)}
+                        >
+                          <span>Investigate</span>
+                          <ExternalLink size={11} className="ml-1" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
